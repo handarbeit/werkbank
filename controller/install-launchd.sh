@@ -1,12 +1,12 @@
 #!/bin/bash
 # Install (or reinstall) the overflow controller as a macOS LaunchAgent for the current user.
 #   install-launchd.sh /path/to/overflow.json [label]
-# Re-runnable. Default label dev.werkbank.overflow; log ~/Library/Logs/<label>.log.
+# Re-runnable. Default label io.handarbeit.werkbank.overflow; log ~/Library/Logs/<label>.log.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CFG="$(cd "$(dirname "${1:?usage: $0 /path/to/overflow.json [label]}")" && pwd)/$(basename "$1")"
 [ -f "$CFG" ] || { echo "no config at $CFG" >&2; exit 1; }
-LABEL=${2:-dev.werkbank.overflow}
+LABEL=${2:-io.handarbeit.werkbank.overflow}
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/$LABEL.log"
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"

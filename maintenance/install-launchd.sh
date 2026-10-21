@@ -1,11 +1,11 @@
 #!/bin/bash
 # Install (or refresh) the host watchdog as a macOS LaunchAgent, every 15 minutes. No sudo needed.
 #   install-launchd.sh /path/to/deployment [label]
-# Default label dev.werkbank.maintenance; log ~/Library/Logs/<label>.log.
+# Default label io.handarbeit.werkbank.maintenance; log ~/Library/Logs/<label>.log.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEPLOY="$(cd "${1:?usage: $0 /path/to/deployment [label]}" && pwd)"
-LABEL=${2:-dev.werkbank.maintenance}
+LABEL=${2:-io.handarbeit.werkbank.maintenance}
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/$LABEL.log"
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
