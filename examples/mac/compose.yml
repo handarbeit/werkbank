@@ -1,0 +1,60 @@
+# Example deployment: Linux runners on a Mac (OrbStack or Docker Desktop) for one GitHub org.
+# In a real deployment, werkbank is a git submodule at ./werkbank and `file:` below is
+# werkbank/compose/runner.yml; here it points back into this repo so the example validates.
+#
+#   docker compose config      # check it
+#   docker compose up -d       # first start; afterwards recreate with werkbank/bin/roll.sh
+#
+# One runner per service, each on its own cpuset: Node's availableParallelism() (and with it
+# vitest, jest and friends) reports the cpuset, so jobs size their worker pools to it instead of
+# to every core of the VM. See docs/runners.md.
+
+x-org: &org                     # shared by the org-pool runners
+  RUNNER_SCOPE: org
+  ORG_NAME: my-org
+  ACCESS_TOKEN: ${MY_ORG_TOKEN}  # from .env; see .env.example
+  RUNNER_NAME_PREFIX: mac-my-org
+  LABELS: orb
+
+services:
+  pool-1:
+    extends: { file: ../../compose/runner.yml, service: runner }
+    cpuset: "0-3"
+    environment: *org
+  pool-2:
+    extends: { file: ../../compose/runner.yml, service: runner }
+    cpuset: "4-7"
+    environment: *org
+
+  # Light tier: seconds-long jobs (change detection, config checks, verdict jobs) target
+  # `orb-light`, so they never wait behind builds. Several share a cpuset, capped at 2 CPUs each.
+  light:
+    extends: { file: ../../compose/runner.yml, service: runner }
+    cpuset: "8-11"
+    cpus: 2
+    mem_limit: 3g
+    environment:
+      <<: *org
+      RUNNER_NAME_PREFIX: mac-my-org-light
+      LABELS: orb-light
+      NODE_OPTIONS: --max-old-space-size=2048     # inside the 3 GB limit
+    deploy:
+      replicas: 2
+
+  # A repo-level runner for a repo outside the org.
+  side-project:
+    extends: { file: ../../compose/runner.yml, service: runner }
+    cpuset: "12-15"
+    environment:
+      RUNNER_SCOPE: repo
+      REPO_URL: https://github.com/me/side-project
+      ACCESS_TOKEN: ${PERSONAL_TOKEN}
+      RUNNER_NAME_PREFIX: mac-side-project
+      LABELS: orb
+
+volumes:
+  # Create it owned by `runner` (jobs run non-root) before the first start:
+  #   docker volume create <project>_runner-caches
+  #   docker run --rm -v <project>_runner-caches:/caches --entrypoint sh werkbank-runner:local \
+  #     -c 'mkdir -p /caches/pnpm-store /caches/ms-playwright && chown -R runner:runner /caches'
+  runner-caches:

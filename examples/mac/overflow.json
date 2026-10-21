@@ -1,0 +1,15 @@
+{
+  "org": "my-org",
+  "token_var": "MY_ORG_TOKEN",
+  "env_file": ".env",
+  "routing_label": "orb",
+  "overflow_label": "orb-overflow",
+  "overflow_tiers": ["tier-2", "tier-3"],
+  "shed_label": "orb-shed",
+  "pressure_load_high": 40,
+  "pressure_load_low": 25,
+  "repos": ["app", "api"],
+  "interval_seconds": 15,
+  "promote_after_ticks": 2,
+  "demote_after_ticks": 8
+}

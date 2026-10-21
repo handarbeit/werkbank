@@ -1,0 +1,43 @@
+# The shared runner definition. A deployment's compose file extends it once per runner and adds
+# only what is its own: scope (org or repo), token, labels, name prefix, cpuset and memory.
+#
+#   services:
+#     pool-1:
+#       extends: { file: werkbank/compose/runner.yml, service: runner }
+#       cpuset: "0-3"
+#       environment: { RUNNER_SCOPE: org, ORG_NAME: my-org, ACCESS_TOKEN: ${MY_ORG_TOKEN}, ... }
+#   volumes:
+#     runner-caches:          # extends does not carry top-level volumes; declare it yourself
+#
+# See examples/ for complete deployments, and docs/runners.md for why each setting is here.
+
+services:
+  runner:
+    build: ../image
+    image: ${WERKBANK_IMAGE:-werkbank-runner:local}
+    restart: always
+    environment:
+      # One job per container. The runner deregisters and exits after it, and Docker restarts the
+      # container fresh (image/clean-start.sh wipes the last job's files).
+      EPHEMERAL: "true"
+      # Jobs run as the image's `runner` user (passwordless sudo), as on ubuntu-latest. As root,
+      # tests that chmod a file unreadable can still read it.
+      RUN_AS_ROOT: "false"
+      # Node sizes its default heap from the container's memory: ~2 GB in an 8 GB container,
+      # against ~4 GB on GitHub-hosted runners, and `tsc && vite build` can die out of memory. A
+      # workflow that sets NODE_OPTIONS overrides this.
+      NODE_OPTIONS: --max-old-space-size=4096
+      # pnpm store and Playwright browsers, shared across runners and jobs through the
+      # runner-caches volume; both tools lock for concurrent use. pnpm 10 reads npm_config_*,
+      # pnpm 11+ reads only pnpm_config_*, so both are set. `copy`: the store is a volume and the
+      # workspace is the container's overlay, so hardlinks cannot cross, and `auto`'s probing
+      # intermittently lost files mid-import (ERR_PNPM_ENOENT copyfile). Read docs/pnpm.md
+      # before using pnpm/action-setup with pnpm 11+ against this store.
+      npm_config_store_dir: /caches/pnpm-store
+      npm_config_package_import_method: copy
+      pnpm_config_store_dir: /caches/pnpm-store
+      pnpm_config_package_import_method: copy
+      PLAYWRIGHT_BROWSERS_PATH: /caches/ms-playwright
+    volumes:
+      - runner-caches:/caches
+    mem_limit: 8g

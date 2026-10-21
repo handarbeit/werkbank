@@ -1,0 +1,29 @@
+# Example deployment: Linux x64 runners in a WSL2 distro on a Windows machine, as the slower
+# overflow tier of an org pool. windows/wsl-setup.ps1 copies this file, .env and werkbank's
+# image/ and compose/ into /opt/<distro>/ inside the distro; there `file:` is
+# werkbank/compose/runner.yml.
+#
+# They register hidden: `orb-overflow` + a tier, not `orb`, so no job lands on them until the
+# overflow controller adds `orb` (controller/overflow.py, docs/overflow.md).
+
+x-org: &org
+  RUNNER_SCOPE: org
+  ORG_NAME: my-org
+  ACCESS_TOKEN: ${MY_ORG_TOKEN}
+  RUNNER_NAME_PREFIX: wsl-my-org
+  LABELS: orb-overflow,orb-x64,tier-3
+
+services:
+  x64-1:
+    extends: { file: ../../compose/runner.yml, service: runner }
+    cpuset: "0-3"
+    mem_limit: 7g
+    environment: *org
+  x64-2:
+    extends: { file: ../../compose/runner.yml, service: runner }
+    cpuset: "4-7"
+    mem_limit: 7g
+    environment: *org
+
+volumes:
+  runner-caches:
