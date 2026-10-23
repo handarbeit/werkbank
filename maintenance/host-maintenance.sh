@@ -11,6 +11,9 @@
 #   < STOP_GB   stop the Linux runners so CI cannot fill the disk to zero: a full disk can
 #               stop the Docker VM itself and take every runner down mid-job.
 #   >= START_GB start them again if this script was what stopped them.
+# Every RUNNER_CHECK_HOURS: if GitHub has released a newer Actions runner than the image has,
+#             rebuild the image (docs/runners.md, "Runner versions").
+# Every run:  recreate runners still on an older image, each only while idle (bin/roll.sh --once).
 # Once a day, only while no runner is mid-job:
 #   the shared cache volume is wiped if it exceeds CACHE_MAX_GB (it refills
 #   on demand), and dangling Docker images are pruned.
@@ -26,6 +29,7 @@ STOP_GB=5
 START_GB=10
 CACHE_MAX_GB=12
 SNAPSHOT_KEEP_HOURS=2
+RUNNER_CHECK_HOURS=6
 # The runner image (for throwaway containers on the cache volume) and that volume's name: compose
 # prefixes volumes with the project name, which defaults to the deployment directory's name.
 IMAGE=$(grep -s '^WERKBANK_IMAGE=' .env | cut -d= -f2-); IMAGE=${IMAGE:-werkbank-runner:local}
@@ -132,6 +136,55 @@ if [ -f "$hb" ] && [ -n "$(find "$hb" -mmin +5 2>/dev/null)" ]; then
     touch "$STATE/overflow-warned"
     log "overflow controller heartbeat is stale: $(cat "$hb")"
     notify "CI overflow controller has stopped; slower runners stay hidden until it is back."
+  fi
+fi
+
+# --- runner upgrades ---------------------------------------------------------
+# Runners don't update themselves (DISABLE_AUTO_UPDATE, compose/runner.yml): an ephemeral
+# container's self-update can leave it with no runner. GitHub stops sending jobs to a runner some
+# weeks after a newer release, so the image follows releases here instead: build --pull picks up
+# the base image's new runner, and if the base hasn't caught up yet, the Dockerfile installs the
+# release itself (RUNNER_VERSION).
+runner_version() {
+  docker run --rm --entrypoint sh "$IMAGE" -c \
+    'grep -o "\"Runner.Listener/[0-9.]*\"" /actions-runner/bin/Runner.Listener.deps.json | head -1' 2>/dev/null \
+    | sed 's/.*\///; s/"//g'
+}
+if [ ! -f "$STATE/stopped-for-disk" ] && [ -z "$(find "$STATE/runner-checked" -mmin -$((RUNNER_CHECK_HOURS * 60)) 2>/dev/null)" ]; then
+  latest=$(curl -fsS --max-time 30 https://api.github.com/repos/actions/runner/releases/latest 2>/dev/null \
+    | sed -n 's/.*"tag_name": *"v\([0-9.]*\)".*/\1/p')
+  current=$(runner_version)
+  if [ -n "$latest" ] && [ -n "$current" ]; then
+    touch "$STATE/runner-checked"
+    if [ "$latest" != "$current" ] && [ "$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)" = "$latest" ]; then
+      log "Actions runner $latest released (image has $current): rebuilding"
+      to 1800 docker compose build --pull >/dev/null 2>&1
+      [ "$(runner_version)" = "$latest" ] \
+        || to 1800 docker compose build --build-arg RUNNER_VERSION="$latest" >/dev/null 2>&1
+      now=$(runner_version)
+      if [ "$now" = "$latest" ]; then
+        log "image rebuilt with runner $now; runners move to it as they go idle"
+        notify "CI runner image rebuilt with Actions runner $now."
+      else
+        log "image rebuild failed (runner ${now:-unknown}, want $latest)"
+        notify "CI runner image rebuild for Actions runner $latest failed; see the maintenance log."
+      fi
+    fi
+  fi
+fi
+# Recreate, while idle, every runner whose container isn't on the current image. Needs `gh`
+# (bin/roll.sh checks GitHub's view of each runner); busy ones are retried next run.
+if [ ! -f "$STATE/stopped-for-disk" ] && image_id=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null); then
+  stale=$(for svc in $(docker compose config --services 2>/dev/null); do
+    for c in $(docker compose ps -q "$svc"); do
+      [ "$(docker inspect -f '{{.Config.Image}}' "$c")" = "$IMAGE" ] || continue
+      [ "$(docker inspect -f '{{.Image}}' "$c")" = "$image_id" ] || { echo "$svc"; break; }
+    done
+  done)
+  if [ -n "$stale" ]; then
+    # shellcheck disable=SC2086
+    WERKBANK_DEPLOY="$DIR" "$WERKBANK/bin/roll.sh" --once $stale 2>&1 | grep -v 'busy, skipped' \
+      | while read -r line; do log "runner upgrade: $line"; done
   fi
 fi
 

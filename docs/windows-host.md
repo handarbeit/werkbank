@@ -51,6 +51,12 @@ own**:
 - **Docker Engine inside the distro**, not Docker Desktop.
 - Can be torn down with `wsl --unregister <distro>` without touching anything else.
 
+The WSL distro doesn't run the watchdog, so its runner image doesn't follow Actions runner
+releases by itself ([runners.md](runners.md#runner-versions)). Runners there don't update
+themselves either, so nothing breaks; rebuild inside the distro every few weeks, or when the Mac's
+watchdog reports a new release: `docker compose build --pull`, then recreate the runners as they go
+idle.
+
 An older x64 CPU will be slower than an Apple-silicon Mac; a 2018 6-core desktop ran unit tests
 about 2.3x slower than a Mac Studio. That's the case for making it an overflow tier
 ([overflow.md](overflow.md)).

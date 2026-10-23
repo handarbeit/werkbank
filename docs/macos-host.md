@@ -61,6 +61,8 @@ sudo bash werkbank/macos/setup.sh /path/to/macos-runners.conf   # see examples/m
 - **Daily, only while no runner is mid-job:** wipe the shared cache volume past `CACHE_MAX_GB`
   (it refills on demand), and prune dangling images.
 - **pnpm store repair** ([pnpm.md](pnpm.md)).
+- **Runner upgrades:** rebuild the image when GitHub releases a new Actions runner, and move idle
+  runners onto it ([runners.md](runners.md#runner-versions)). Needs `gh` logged in.
 - **Controller heartbeat:** if the overflow controller's heartbeat is stale, warn and restore any
   shed runners ([overflow.md](overflow.md)).
 

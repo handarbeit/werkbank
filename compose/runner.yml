@@ -23,6 +23,11 @@ services:
       # Jobs run as the image's `runner` user (passwordless sudo), as on ubuntu-latest. As root,
       # tests that chmod a file unreadable can still read it.
       RUN_AS_ROOT: "false"
+      # No self-updates. A runner updates itself in place after a job; in an ephemeral container
+      # the restart can cut that short and leave no runner at all, crash-looping until the
+      # container is recreated. The watchdog rebuilds the image for each new runner release
+      # instead, and rolls the runners onto it as they go idle (docs/runners.md).
+      DISABLE_AUTO_UPDATE: "true"
       # Node sizes its default heap from the container's memory: ~2 GB in an 8 GB container,
       # against ~4 GB on GitHub-hosted runners, and `tsc && vite build` can die out of memory. A
       # workflow that sets NODE_OPTIONS overrides this.

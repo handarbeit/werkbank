@@ -80,6 +80,31 @@ only once its runners are idle by three checks, all passing twice, 20 s apart:
    `Runner.Worker` exists, the window a `ps` check alone misses;
 3. the runner is registered and online.
 
+`roll.sh --once <service>...` doesn't wait: it recreates the services that are idle now, skips
+the busy ones and exits 1 if it skipped any. The watchdog uses it to move runners onto a new image.
+
+## Runner versions
+
+**Runners don't update themselves** (`DISABLE_AUTO_UPDATE` in `compose/runner.yml`). By default
+a runner updates itself after a job when GitHub has released a newer version. It moves `bin/` and
+`externals/` aside, starts an updater, and exits. In an ephemeral container that exit restarts
+the container, which can cut the update short and leave no runner at all. The container then
+crash-loops (`./bin/Runner.Listener: No such file or directory`) until it's recreated, and since
+every runner hits the next release within hours, a whole tier can go dark at once.
+
+The watchdog keeps the image current instead. Every `RUNNER_CHECK_HOURS` (6) it compares the
+image's runner with GitHub's latest release, and if there's a newer one it rebuilds:
+`docker compose build --pull` picks up the base image's new runner, and if the base hasn't caught
+up yet, the build installs the release itself (the Dockerfile's `RUNNER_VERSION` argument). Then,
+every run, it recreates each runner still on the old image once it's idle (`roll.sh --once`).
+GitHub keeps sending jobs to an older runner for some weeks after a release, so there's no rush.
+
+To upgrade by hand: `docker compose build --pull`, then `bin/roll.sh <service>...`; or pin a
+version with `docker compose build --build-arg RUNNER_VERSION=2.338.1`.
+
+If a runner did update itself and broke anyway, `image/clean-start.sh` puts the previous version
+back (`bin.<version>` to `bin`) when the container restarts.
+
 ## Superseded runs
 
 Most queueing on self-hosted runners is self-inflicted: every push to a PR starts a full run while

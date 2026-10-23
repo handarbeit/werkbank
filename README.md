@@ -27,7 +27,7 @@ a fork's pull request run code on your machine.
 | [`compose/runner.yml`](compose/runner.yml) | The shared runner definition your deployment `extends` once per runner |
 | [`bin/roll.sh`](bin/roll.sh) | Recreate runners only once they're idle, so a config change never kills a job |
 | [`controller/`](controller/) | The **overflow controller**: priority tiers across machines, plus host-pressure mode ([docs/overflow.md](docs/overflow.md)) |
-| [`maintenance/`](maintenance/) | The host watchdog: disk space, Time Machine snapshot thinning, cache hygiene, pnpm store repair, controller heartbeat |
+| [`maintenance/`](maintenance/) | The host watchdog: disk space, Time Machine snapshot thinning, runner upgrades, cache hygiene, pnpm store repair, controller heartbeat |
 | [`macos/`](macos/) | Native macOS runners in a dedicated user's GUI session (for Electron, the iOS Simulator) |
 | [`windows/`](windows/) | A native Windows runner as a service, and a sealed WSL2 distro for Linux x64 containers |
 | [`examples/`](examples/) | Complete example deployments |
