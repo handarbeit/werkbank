@@ -110,10 +110,14 @@ fi
 # pnpm 11+ installs itself into the shared store (v11/links). Its native binary is a
 # hardlink of a store file, and pnpm/action-setup's version switching can overwrite that file
 # with a 3.5 KB placeholder script, after which every job dies in "Setup pnpm"
-# (ERR_PNPM_BROKEN_PNPM_INSTALL) and nothing repairs it (docs/pnpm.md). Detect a placeholder-sized binary that is older than a first download
-# could plausibly still be replacing it, and drop v11 (it refills, ~1 GB).
+# (ERR_PNPM_BROKEN_PNPM_INSTALL) and nothing repairs it (docs/pnpm.md). Detect a small pnpm
+# "binary" that isn't an ELF executable, and drop v11 (it refills, ~1 GB). The real binary is tens
+# of MB and starts with the ELF header even mid-download, so this needs no age guard; an earlier
+# 10-minute guard never fired on a busy host, where every job rewrites the placeholder.
 broken=$(docker run --rm -v "$CACHE_VOLUME":/caches --entrypoint sh "$IMAGE" -c \
-  'find /caches/pnpm-store/v11/links/@pnpm -path "*/node_modules/@pnpm/exe.*/pnpm" -type f -size -1000k -mmin +10 2>/dev/null | head -1')
+  'for f in $(find /caches/pnpm-store/v11/links/@pnpm -path "*/node_modules/@pnpm/exe.*/pnpm" -type f -size -1000k 2>/dev/null); do
+     [ "$(head -c 4 "$f" | tail -c 3)" = ELF ] || { echo "$f"; break; }
+   done')
 if [ -n "$broken" ]; then
   docker run --rm -v "$CACHE_VOLUME":/caches --entrypoint sh "$IMAGE" -c 'rm -rf /caches/pnpm-store/v11'
   log "broken pnpm self-install in the shared store ($broken): wiped pnpm-store/v11"

@@ -29,8 +29,10 @@ Install pnpm directly instead:
   run: npm i -g "pnpm@$(node -p "require('./package.json').packageManager.split('@')[1].split('+')[0]")"
 ```
 
-The watchdog (`maintenance/host-maintenance.sh`) detects a placeholder-sized pnpm binary in the
-store and wipes `pnpm-store/v11`, which refills (~1 GB) on the next job.
+The watchdog (`maintenance/host-maintenance.sh`) detects a pnpm "binary" in the store that is
+really a placeholder (not an ELF executable) and wipes `pnpm-store/v11`, which refills (~1 GB) on
+the next job. That's a repair after the fact: jobs fail until it runs, and the next switch breaks
+the store again. Fix the workflow.
 
 ## Don't use `setup-node`'s cache
 
