@@ -10,6 +10,11 @@ we once saw 23 GB across 9 runners in two hours. Two things survive on purpose:
 `/opt/hostedtoolcache` (setup-node downloads) and the shared `/caches` volume (pnpm store,
 Playwright browsers).
 
+The toolcache keeps the Node releases, not what jobs installed into them. `npm i -g` writes into
+the cached Node's own prefix, and setup-node puts that `bin/` first on `PATH`, so one repo's
+`npm i -g pnpm@12` would shadow another repo's pnpm from pnpm/action-setup. `clean-start.sh`
+resets each cached Node to what it ships with (`node`, `npm`, `npx`, `corepack`) at every start.
+
 Re-registration takes a few seconds, longer on a loaded host. A runner between jobs briefly
 disappears from GitHub's runner list; that's normal.
 
