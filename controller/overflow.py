@@ -25,15 +25,16 @@ heartbeat goes stale.
 
 Run:  overflow.py [--config PATH] [--once] [--dry-run] [--restore]
 Config: --config, else $WERKBANK_OVERFLOW_CONFIG, else ./overflow.json (see examples/overflow.json).
-Uses the org token named in the config (token_var), read from the config's env_file (default:
-.env next to the config): reads go straight to the REST API, writes through the `gh` CLI.
+Uses a GitHub App (app_id_var, app_key_var) or an org token (token_var), read from the config's
+env_file (default: .env next to the config): reads go straight to the REST API, writes through
+the `gh` CLI.
 
 API quota. A token's 5,000 requests an hour are shared with everything else that uses it, and a
 tick reads every run and its jobs. Reads are conditional (ETag): GitHub answers an unchanged
 resource with 304, which costs no quota, so a quiet queue is nearly free. If the quota runs out
 anyway, the loop waits for the reset instead of failing every tick until then.
 """
-import json, os, signal, subprocess, sys, time, urllib.error, urllib.request
+import base64, calendar, json, os, signal, subprocess, sys, time, urllib.error, urllib.request
 from pathlib import Path
 
 def _arg(flag):
@@ -55,20 +56,64 @@ _DEFAULT_STATE = ("~/Library/Application Support/werkbank/overflow" if sys.platf
                   else "~/.local/state/werkbank/overflow")
 STATE = Path(os.path.expanduser(CFG.get("state_dir", _DEFAULT_STATE)))
 
-# Credentials: an org token from the env file (fine-grained: org "Self-hosted runners: read and
-# write" to change labels, repo "Actions: read" to see queued jobs), not a personal `gh` login, so
-# the loop runs the same under launchd or systemd. Nothing else in the env file is used.
+# Credentials, from the env file, not a personal `gh` login, so the loop runs the same under launchd
+# or systemd. Either a GitHub App (app_id_var + app_key_var: its own rate limit, nobody's personal
+# quota) or an org token (token_var: fine-grained, org "Self-hosted runners: read and write" to
+# change labels, repo "Actions: read" to see queued jobs). Nothing else in the env file is used.
 _ENV_FILE = (CFG_PATH.parent / CFG.get("env_file", ".env")).resolve()
-_env = {k: v for k, _, v in (l.partition("=") for l in _ENV_FILE.read_text().splitlines()) if v}
-os.environ["GH_TOKEN"] = _env[CFG["token_var"]]
+_env = {k.strip(): v.strip().strip('"').replace("\\n", "\n")
+        for k, _, v in (l.partition("=") for l in _ENV_FILE.read_text().splitlines()) if v}
+APP_ID = _env[CFG["app_id_var"]] if "app_id_var" in CFG else None
+APP_KEY = _env[CFG["app_key_var"]].encode() if APP_ID else None
+if not APP_ID:
+    os.environ["GH_TOKEN"] = _env[CFG["token_var"]]
 STATE.mkdir(parents=True, exist_ok=True)
+_app = {"expires": 0}
 
 
 def log(msg):
     print(f"{time.strftime('%F %T')} {msg}", flush=True)
 
 
+def _b64(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=")
+
+
+def _app_jwt():
+    now = int(time.time())
+    msg = _b64(b'{"alg":"RS256","typ":"JWT"}') + b"." + _b64(json.dumps(
+        {"iat": now - 60, "exp": now + 540, "iss": APP_ID}).encode())
+    r, w = os.pipe()                               # the key reaches openssl through a pipe, never a file
+    os.write(w, APP_KEY)
+    os.close(w)
+    try:
+        sig = subprocess.run(["openssl", "dgst", "-sha256", "-sign", f"/dev/fd/{r}"], input=msg,
+                             capture_output=True, pass_fds=(r,), timeout=30, check=True).stdout
+    finally:
+        os.close(r)
+    return (msg + b"." + _b64(sig)).decode()
+
+
+def _app_call(path, method="GET"):
+    req = urllib.request.Request("https://api.github.com/" + path, method=method, headers={
+        "Authorization": "Bearer " + _app_jwt(), "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read())
+
+
+def ensure_token():
+    """With a GitHub App, keep GH_TOKEN a live installation token (they last an hour)."""
+    if not APP_ID or time.time() < _app["expires"] - 600:
+        return
+    if "installation" not in _app:
+        _app["installation"] = _app_call(f"orgs/{ORG}/installation")["id"]
+    t = _app_call(f"app/installations/{_app['installation']}/access_tokens", method="POST")
+    os.environ["GH_TOKEN"] = t["token"]
+    _app["expires"] = calendar.timegm(time.strptime(t["expires_at"], "%Y-%m-%dT%H:%M:%SZ"))
+
+
 def gh(*args, method="GET"):
+    ensure_token()
     out = subprocess.run(["gh", "api", "-X", method, *args], capture_output=True, text=True, timeout=60)
     if out.returncode:
         raise RuntimeError(f"gh api {' '.join(args)}: {out.stderr.strip()[:200]}")
@@ -87,6 +132,7 @@ _read = set()
 
 def get(path):
     """GET with If-None-Match, so an unchanged resource costs no quota."""
+    ensure_token()
     url = "https://api.github.com/" + path
     _read.add(url)
     req = urllib.request.Request(url, headers={
