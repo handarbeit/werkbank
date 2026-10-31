@@ -1,6 +1,7 @@
 {
   "org": "my-org",
-  "token_var": "MY_ORG_TOKEN",
+  "app_id": 123456,
+  "app_key_var": "MY_APP_KEY",
   "env_file": ".env",
   "routing_label": "orb",
   "overflow_label": "orb-overflow",

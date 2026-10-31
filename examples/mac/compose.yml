@@ -12,7 +12,11 @@
 x-org: &org                     # shared by the org-pool runners
   RUNNER_SCOPE: org
   ORG_NAME: my-org
-  ACCESS_TOKEN: ${MY_ORG_TOKEN}  # from .env; see .env.example
+  # A GitHub App, not a personal token: its own rate limit (docs/github-app.md). Each
+  # credential is named here; no `env_file: .env`, which would hand every variable to jobs.
+  APP_ID: "123456"
+  APP_PRIVATE_KEY: ${MY_APP_KEY}   # from .env; see .env.example
+  APP_LOGIN: my-org
   RUNNER_NAME_PREFIX: mac-my-org
   LABELS: orb
 
@@ -41,7 +45,8 @@ services:
     deploy:
       replicas: 2
 
-  # A repo-level runner for a repo outside the org.
+  # A repo-level runner for a repo outside the org, where the org's App can't be installed:
+  # a fine-grained PAT (docs/github-app.md, "Repos outside the org").
   side-project:
     extends: { file: ../../compose/runner.yml, service: runner }
     cpuset: "12-15"

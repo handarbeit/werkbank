@@ -141,30 +141,11 @@ replaced*. GitHub keeps only one *pending* run per concurrency group even with
   constantly. A host that showed fine speed tests was getting ~0.5 Mbit/s per connection upstream
   over a 6 GHz Wi-Fi link; a cable fixed it.
 
-## GitHub App
+## Credentials
 
-By default runners register with a personal access token, so every ephemeral runner spends that
-person's API quota after each job. A GitHub App has its own quota. The runner image signs in as one
-when `APP_ID`, `APP_PRIVATE_KEY` and `APP_LOGIN` (the org) are set instead of `ACCESS_TOKEN`:
-
-```yaml
-x-org: &org
-  RUNNER_SCOPE: org
-  ORG_NAME: my-org
-  APP_ID: ${MY_APP_ID}
-  APP_PRIVATE_KEY: ${MY_APP_KEY}
-  APP_LOGIN: my-org
-```
-
-Create the App under the org (Settings → Developer settings → GitHub Apps) with organization
-permission "Self-hosted runners: read and write", plus repository "Actions: read" if the overflow
-controller uses it too, and install it on the org. Generate a private key and put it in `.env` on
-one line:
-
-```bash
-printf 'MY_APP_KEY="%s"\n' "$(awk '{printf "%s\\n", $0}' ~/Downloads/my-app.*.private-key.pem)" >> .env
-```
-
-Pass credentials to each service by name, as above, and don't give the services `env_file: .env`.
-The image clears its own variables (`ACCESS_TOKEN`, `APP_*`) before a job starts, but any other
-variable in the container's environment is visible to every job.
+Register runners with a GitHub App, not a personal token: an ephemeral runner asks for a
+registration token after every job, and on a personal token that spends the person's API quota.
+[github-app.md](github-app.md) has the setup. Whatever the credential, name it per service in
+`environment:` and don't give services `env_file: .env`: the image clears only its own variables
+(`ACCESS_TOKEN`, `APP_*`) before a job starts, so anything else in the container's environment is
+visible to every job.

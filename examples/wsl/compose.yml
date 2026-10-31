@@ -9,7 +9,9 @@
 x-org: &org
   RUNNER_SCOPE: org
   ORG_NAME: my-org
-  ACCESS_TOKEN: ${MY_ORG_TOKEN}
+  APP_ID: "123456"                 # the org's GitHub App (docs/github-app.md)
+  APP_PRIVATE_KEY: ${MY_APP_KEY}   # from .env; no env_file, which would hand .env to jobs
+  APP_LOGIN: my-org
   RUNNER_NAME_PREFIX: wsl-my-org
   LABELS: orb-overflow,orb-x64,tier-3
 

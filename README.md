@@ -44,14 +44,14 @@ my-ci/                       # your private deployment repo
   overflow.json              # controller config (org, repos, tiers, thresholds)
   macos-runners.conf         # native macOS runners, if any
   maintenance.env            # watchdog overrides, if any
-  .env                       # tokens (gitignored, mode 600)
+  .env                       # the GitHub App's key (gitignored, mode 600)
 ```
 
 ```bash
 git submodule add https://github.com/handarbeit/werkbank werkbank
 cp werkbank/examples/mac/compose.yml werkbank/examples/mac/.env.example .
 # edit compose.yml: `file: werkbank/compose/runner.yml`, your org, cpusets and labels
-mv .env.example .env && chmod 600 .env    # then fill in the tokens
+mv .env.example .env && chmod 600 .env    # then add the App's key: docs/github-app.md
 
 docker compose build && docker compose up -d
 werkbank/maintenance/install-launchd.sh "$PWD"                   # the watchdog (macOS)
@@ -72,6 +72,8 @@ To take a Werkbank upgrade, bump the submodule, read the changelog, and roll:
 
 ## Docs
 
+- [Credentials: a GitHub App](docs/github-app.md): why not a personal token, creating the App,
+  wiring runners, the controller and native macOS runners to it.
 - [Runners](docs/runners.md): the ephemeral model, cpusets, heap size, routing, safe restarts,
   light tier, and gotchas.
 - [Overflow and priority tiers](docs/overflow.md): spilling to slower machines only when needed,

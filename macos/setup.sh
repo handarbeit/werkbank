@@ -4,7 +4,7 @@
 #   sudo bash macos/setup.sh /path/to/macos-runners.conf
 #
 # The conf file (bash; see examples/mac/macos-runners.conf) sets TARGETS, and optionally CI_USER,
-# LABEL, RETIRED, TOKEN_VARS and ENV_FILE. Creates the `ci` account (asks for its password),
+# LABEL, RETIRED, APPS, TOKEN_VARS and ENV_FILE. Creates the `ci` account (asks for its password),
 # installs one runner per entry in TARGETS under /Users/ci/actions-runners/<name>, and a
 # LaunchAgent that starts them when `ci` logs in. Jobs need a GUI session (Electron windows, the
 # iOS Simulator), which a LaunchDaemon cannot give them — so after this, log
@@ -13,9 +13,9 @@
 # Re-running is safe: existing runners are left alone, missing ones added.
 # A TARGETS entry is a repo (owner/name, a repo-level runner) or an org (name
 # alone, a runner in that org's pool: it serves every private repo there).
-# Registration tokens come from ENV_FILE (default: .env next to the conf): the
-# variable TOKEN_VARS names for the target's owner, else ACCESS_TOKEN; nothing is
-# printed. RETIRED names are runners that used to be installed here: their
+# Registration tokens come from ENV_FILE (default: .env next to the conf): a GitHub
+# App's, if APPS has the target's owner (docs/github-app.md), else the PAT in the
+# variable TOKEN_VARS names for the owner, else ACCESS_TOKEN; nothing is printed. RETIRED names are runners that used to be installed here: their
 # LaunchAgent and directory are removed first (their GitHub registration is
 # deleted separately, via the API, since config.sh remove 404s for a repo that
 # has been transferred).
@@ -26,6 +26,7 @@ CI_USER=ci
 LABEL=orb-macos
 TARGETS=()
 RETIRED=()
+APPS=()                  # "owner=app_id:VAR" pairs, VAR holding the App's key, e.g. (my-org=123456:MY_APP_KEY)
 TOKEN_VARS=()            # "owner=VAR" pairs, e.g. (my-org=MY_ORG_TOKEN)
 ENV_FILE="$(dirname "$CONF")/.env"
 # shellcheck disable=SC1090
@@ -33,8 +34,33 @@ ENV_FILE="$(dirname "$CONF")/.env"
 [ ${#TARGETS[@]} -gt 0 ] || { echo "no TARGETS in $CONF" >&2; exit 1; }
 
 [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
-token_for() {          # the PAT that may register runners for this target
+env_val() {            # a value from ENV_FILE, quotes stripped
+  local v
+  v=$(grep "^$1=" "$ENV_FILE" | cut -d= -f2-)
+  v=${v#\"}; printf '%s' "${v%\"}"
+}
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+app_token() {          # target app_id key_var: an installation token for the App
+  local key now jwt inst
+  key=$(env_val "$3")
+  [ -n "$key" ] || { echo "no $3 in $ENV_FILE" >&2; exit 1; }
+  now=$(date +%s)
+  jwt=$(printf '{"alg":"RS256","typ":"JWT"}' | b64url).$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' \
+    $((now - 60)) $((now + 540)) "$2" | b64url)
+  # The key reaches openssl through a pipe, never a file or the command line.
+  jwt=$jwt.$(printf '%s' "$jwt" | openssl dgst -sha256 -sign <(printf '%b\n' "$key") | b64url)
+  inst=$(printf 'Authorization: Bearer %s\n' "$jwt" | curl -fsSL -H @- \
+    "https://api.github.com/$(api_of "$1")/installation" | /usr/bin/jq -r .id)
+  printf 'Authorization: Bearer %s\n' "$jwt" | curl -fsSL -X POST -H @- \
+    "https://api.github.com/app/installations/$inst/access_tokens" | /usr/bin/jq -r .token
+}
+token_for() {          # a token that may register runners for this target
   local var=ACCESS_TOKEN t pair
+  for pair in ${APPS[@]+"${APPS[@]}"}; do
+    if [ "${1%%/*}" = "${pair%%=*}" ]; then
+      t=${pair#*=}; app_token "$1" "${t%%:*}" "${t#*:}"; return
+    fi
+  done
   for pair in ${TOKEN_VARS[@]+"${TOKEN_VARS[@]}"}; do
     [ "${1%%/*}" = "${pair%%=*}" ] && var=${pair#*=}
   done
@@ -86,7 +112,7 @@ for target in "${TARGETS[@]}"; do
   if [ -f "$dir/.runner" ]; then echo "$target: already configured"; continue; fi
   as_ci mkdir -p "$dir"
   as_ci tar xzf "$pkg" -C "$dir"
-  # The header goes in on stdin (-H @-): on the command line, the PAT would show
+  # The header goes in on stdin (-H @-): on the command line, the token would show
   # in any user's `ps` output for as long as curl runs.
   reg=$(printf 'Authorization: Bearer %s\n' "$(token_for "$target")" | curl -fsSL -X POST -H @- \
     "https://api.github.com/$(api_of "$target")/actions/runners/registration-token" | /usr/bin/jq -r .token)

@@ -5,7 +5,7 @@
 #     pool-1:
 #       extends: { file: werkbank/compose/runner.yml, service: runner }
 #       cpuset: "0-3"
-#       environment: { RUNNER_SCOPE: org, ORG_NAME: my-org, ACCESS_TOKEN: ${MY_ORG_TOKEN}, ... }
+#       environment: { RUNNER_SCOPE: org, ORG_NAME: my-org, APP_ID: "123456", APP_PRIVATE_KEY: ${MY_APP_KEY}, APP_LOGIN: my-org, ... }
 #   volumes:
 #     runner-caches:          # extends does not carry top-level volumes; declare it yourself
 #
