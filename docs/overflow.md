@@ -55,7 +55,7 @@ pressure mode to mean anything.
 |---|---|
 | `org` | The org whose runners and repos are managed |
 | `token_var`, `env_file` | Which variable in which env file (relative to the config) holds the token: fine-grained, org "Self-hosted runners: read and write", repo "Actions: read" on the watched repos |
-| `app_id_var`, `app_key_var` | Instead of `token_var`: a GitHub App's ID and private key, by variable name in the env file (the key on one line, newlines as `\n`, in double quotes). The App needs organization "Self-hosted runners: read and write" and repository "Actions: read", installed on the org. It has its own rate limit, so the controller stops spending a person's quota; see [GitHub App](runners.md#github-app) |
+| `app_id` or `app_id_var`, `app_key_var` | Instead of `token_var`: a GitHub App's ID (it isn't secret, so it can sit in the config) and its private key, by variable name in the env file (the key on one line, newlines as `\n`, in double quotes). The App needs organization "Self-hosted runners: read and write" and repository "Actions: read", installed on the org. It has its own rate limit, so the controller stops spending a person's quota; see [GitHub App](runners.md#github-app) |
 | `routing_label` | What workflows ask for (`orb`) |
 | `overflow_label` | What hidden overflow runners carry instead (`orb-overflow`) |
 | `overflow_tiers` | Tier labels, best first |

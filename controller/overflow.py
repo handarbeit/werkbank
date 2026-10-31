@@ -57,13 +57,13 @@ _DEFAULT_STATE = ("~/Library/Application Support/werkbank/overflow" if sys.platf
 STATE = Path(os.path.expanduser(CFG.get("state_dir", _DEFAULT_STATE)))
 
 # Credentials, from the env file, not a personal `gh` login, so the loop runs the same under launchd
-# or systemd. Either a GitHub App (app_id_var + app_key_var: its own rate limit, nobody's personal
+# or systemd. Either a GitHub App (app_id or app_id_var, + app_key_var: its own rate limit, nobody's personal
 # quota) or an org token (token_var: fine-grained, org "Self-hosted runners: read and write" to
 # change labels, repo "Actions: read" to see queued jobs). Nothing else in the env file is used.
 _ENV_FILE = (CFG_PATH.parent / CFG.get("env_file", ".env")).resolve()
 _env = {k.strip(): v.strip().strip('"').replace("\\n", "\n")
         for k, _, v in (l.partition("=") for l in _ENV_FILE.read_text().splitlines()) if v}
-APP_ID = _env[CFG["app_id_var"]] if "app_id_var" in CFG else None
+APP_ID = str(CFG.get("app_id") or (_env[CFG["app_id_var"]] if "app_id_var" in CFG else "")) or None
 APP_KEY = _env[CFG["app_key_var"]].encode() if APP_ID else None
 if not APP_ID:
     os.environ["GH_TOKEN"] = _env[CFG["token_var"]]
