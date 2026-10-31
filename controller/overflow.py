@@ -25,10 +25,15 @@ heartbeat goes stale.
 
 Run:  overflow.py [--config PATH] [--once] [--dry-run] [--restore]
 Config: --config, else $WERKBANK_OVERFLOW_CONFIG, else ./overflow.json (see examples/overflow.json).
-Uses the `gh` CLI with the org token named in the config (token_var), read from the config's
-env_file (default: .env next to the config).
+Uses the org token named in the config (token_var), read from the config's env_file (default:
+.env next to the config): reads go straight to the REST API, writes through the `gh` CLI.
+
+API quota. A token's 5,000 requests an hour are shared with everything else that uses it, and a
+tick reads every run and its jobs. Reads are conditional (ETag): GitHub answers an unchanged
+resource with 304, which costs no quota, so a quiet queue is nearly free. If the quota runs out
+anyway, the loop waits for the reset instead of failing every tick until then.
 """
-import json, os, signal, subprocess, sys, time
+import json, os, signal, subprocess, sys, time, urllib.error, urllib.request
 from pathlib import Path
 
 def _arg(flag):
@@ -70,10 +75,49 @@ def gh(*args, method="GET"):
     return json.loads(out.stdout) if out.stdout.strip() else None
 
 
+class RateLimited(Exception):
+    def __init__(self, reset):
+        super().__init__(f"API rate limit exhausted until {time.strftime('%T', time.localtime(reset))}")
+        self.reset = reset
+
+
+_etags = {}     # url -> (etag, body); a 304 replays the body. Pruned to what the last tick read.
+_read = set()
+
+
+def get(path):
+    """GET with If-None-Match, so an unchanged resource costs no quota."""
+    url = "https://api.github.com/" + path
+    _read.add(url)
+    req = urllib.request.Request(url, headers={
+        "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+        "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
+    if url in _etags:
+        req.add_header("If-None-Match", _etags[url][0])
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = json.loads(resp.read() or b"null")
+            if resp.headers.get("ETag"):
+                _etags[url] = (resp.headers["ETag"], body)
+            return body
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            return _etags[url][1]
+        if e.code in (403, 429) and e.headers.get("X-RateLimit-Remaining") == "0":
+            raise RateLimited(int(e.headers.get("X-RateLimit-Reset", time.time() + 60))) from None
+        raise RuntimeError(f"GET {path}: HTTP {e.code} {e.read()[:200]!r}") from None
+
+
+def prune_etags():
+    for url in set(_etags) - _read:
+        del _etags[url]
+    _read.clear()
+
+
 def runners():
     rs, page = [], 1
     while True:
-        r = gh(f"orgs/{ORG}/actions/runners?per_page=100&page={page}")
+        r = get(f"orgs/{ORG}/actions/runners?per_page=100&page={page}")
         rs += r["runners"]
         if len(rs) >= r["total_count"] or not r["runners"]:
             return rs
@@ -85,9 +129,9 @@ def queued_orb_jobs():
     n = 0
     for repo in REPOS:
         for status in ("queued", "in_progress"):
-            runs = gh(f"repos/{ORG}/{repo}/actions/runs?status={status}&per_page=50")["workflow_runs"]
+            runs = get(f"repos/{ORG}/{repo}/actions/runs?status={status}&per_page=50")["workflow_runs"]
             for run in runs:
-                jobs = gh(f"repos/{ORG}/{repo}/actions/runs/{run['id']}/jobs?per_page=100")["jobs"]
+                jobs = get(f"repos/{ORG}/{repo}/actions/runs/{run['id']}/jobs?per_page=100")["jobs"]
                 n += sum(1 for j in jobs if j["status"] == "queued" and WANT in j.get("labels", []))
     return n
 
@@ -185,6 +229,7 @@ def tick(memo):
         if memo["empty_ticks"] >= CFG["demote_after_ticks"]:
             for r in promoted_idle:
                 demote(r)
+    prune_etags()
     (STATE / "heartbeat").write_text(time.strftime("%F %T") + " " + line + "\n")
 
 
@@ -205,6 +250,9 @@ def main():
         while True:
             try:
                 tick(memo)
+            except RateLimited as e:               # every call would fail until the reset
+                log(f"error: {e}; waiting")
+                time.sleep(max(0, min(e.reset - time.time(), 3600)) + 5)
             except Exception as e:                 # keep going; GitHub hiccups are routine
                 log(f"error: {e}")
             if "--once" in sys.argv:

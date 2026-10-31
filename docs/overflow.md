@@ -72,5 +72,9 @@ controller/install-launchd.sh /path/to/overflow.json                     # macOS
 controller/install-systemd.sh /path/to/overflow.json                     # Linux user service
 ```
 
-It needs the `gh` CLI. It costs a handful of API calls per tick, well inside the rate limit for a
-few repos.
+It needs the `gh` CLI (for label changes). A tick reads the runner list, each repo's queued and
+in-progress runs, and every such run's jobs, which used to come to thousands of calls an hour on a
+busy org: enough to exhaust a token's 5,000-an-hour quota, which it shares with everything else
+using that token. Reads are now conditional, and GitHub doesn't charge for an unchanged answer
+(304), so a tick costs one or two calls, a few hundred an hour. If the quota runs out anyway,
+the controller waits for the reset rather than erroring every tick.
