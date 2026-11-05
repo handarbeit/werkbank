@@ -4,13 +4,16 @@
 #   sudo bash macos/setup.sh /path/to/macos-runners.conf
 #
 # The conf file (bash; see examples/mac/macos-runners.conf) sets TARGETS, and optionally CI_USER,
-# LABEL, RETIRED, APPS, TOKEN_VARS and ENV_FILE. Creates the `ci` account (asks for its password),
+# LABEL, RETIRED, APPS, TOKEN_VARS, ENV_FILE and WORK_ROOT. Creates the `ci` account (asks for its password),
 # installs one runner per entry in TARGETS under /Users/ci/actions-runners/<name>, and a
 # LaunchAgent that starts them when `ci` logs in. Jobs need a GUI session (Electron windows, the
 # iOS Simulator), which a LaunchDaemon cannot give them — so after this, log
 # `ci` in once via fast user switching and switch back; it keeps running.
 #
 # Re-running is safe: existing runners are left alone, missing ones added.
+# WORK_ROOT puts each runner's work folder (checkouts, job temp files) at WORK_ROOT/<name>
+# instead of _work inside the runner, e.g. on an APFS volume Time Machine excludes, which then
+# gets no local snapshots (docs/macos-host.md). Setting or changing it moves existing runners too.
 # A TARGETS entry is a repo (owner/name, a repo-level runner) or an org (name
 # alone, a runner in that org's pool: it serves every private repo there).
 # Registration tokens come from ENV_FILE (default: .env next to the conf): a GitHub
@@ -29,6 +32,7 @@ RETIRED=()
 APPS=()                  # "owner=app_id:VAR" pairs, VAR holding the App's key, e.g. (my-org=123456:MY_APP_KEY)
 TOKEN_VARS=()            # "owner=VAR" pairs, e.g. (my-org=MY_ORG_TOKEN)
 ENV_FILE="$(dirname "$CONF")/.env"
+WORK_ROOT=""             # e.g. /Volumes/CI/actions-runners; empty: _work inside each runner
 # shellcheck disable=SC1090
 . "$CONF"
 [ ${#TARGETS[@]} -gt 0 ] || { echo "no TARGETS in $CONF" >&2; exit 1; }
@@ -69,6 +73,7 @@ token_for() {          # a token that may register runners for this target
   echo "$t"
 }
 name_of() { echo "${1#*/}"; }                   # owner/repo -> repo, org -> org
+work_of() { if [ -n "$WORK_ROOT" ]; then echo "$WORK_ROOT/$1"; else echo _work; fi; }
 api_of()  { case "$1" in */*) echo "repos/$1";; *) echo "orgs/$1";; esac; }
 
 # 1. The account: standard (not admin), so jobs cannot sudo or read other homes.
@@ -118,8 +123,25 @@ for target in "${TARGETS[@]}"; do
     "https://api.github.com/$(api_of "$target")/actions/runners/registration-token" | /usr/bin/jq -r .token)
   as_ci bash -c "cd '$dir' && ./config.sh --unattended --replace \
     --url 'https://github.com/$target' --token '$reg' \
-    --name '$(scutil --get LocalHostName)-$name' --labels '$LABEL' --work _work >/dev/null"
+    --name '$(scutil --get LocalHostName)-$name' --labels '$LABEL' --work '$(work_of "$name")' >/dev/null"
   echo "$target: registered"
+done
+
+# Work folders. A runner reads workFolder from .runner (and .runner_migrated, its copy since
+# runner 2.33x) at startup, so an existing runner moves at the restart below. Both files start
+# with a byte-order mark, which jq rejects.
+for target in "${TARGETS[@]}"; do
+  name=$(name_of "$target"); dir="$CI_HOME/actions-runners/$name"; work=$(work_of "$name")
+  if [ -n "$WORK_ROOT" ]; then
+    mkdir -p "$work"; chown "$CI_USER":staff "$WORK_ROOT" "$work"; chmod 700 "$work"
+  fi
+  for f in "$dir/.runner" "$dir/.runner_migrated"; do
+    [ -f "$f" ] || continue
+    cur=$(tail -c +4 "$f" | /usr/bin/jq -r .workFolder)
+    [ "$cur" = "$work" ] && continue
+    as_ci bash -c "{ head -c 3 '$f'; tail -c +4 '$f' | /usr/bin/jq --arg w '$work' '.workFolder = \$w'; } > '$f.new' && mv '$f.new' '$f'"
+    echo "$name: work folder $cur -> $work ($(basename "$f"))"
+  done
 done
 
 # Job environment, rewritten on every run so re-running applies changes.
@@ -173,7 +195,10 @@ xcrun simctl shutdown all >/dev/null 2>&1
 xcrun simctl delete all >/dev/null 2>&1          # CI creates its own devices
 tmp=$(getconf DARWIN_USER_TEMP_DIR)
 find "$tmp" -maxdepth 1 -mindepth 1 -mmin +360 -exec rm -rf {} + 2>/dev/null
-find "$HOME"/actions-runners/*/_work/_temp -mindepth 1 -mmin +360 -exec rm -rf {} + 2>/dev/null
+for r in "$HOME"/actions-runners/*/.runner; do   # each runner's work folder, wherever it is
+  w=$(tail -c +4 "$r" | jq -r .workFolder); case "$w" in /*) ;; *) w="${r%/.runner}/$w";; esac
+  find "$w/_temp" -mindepth 1 -mmin +360 -exec rm -rf {} + 2>/dev/null
+done
 # Package caches refill on demand; only drop them once they get large.
 for c in "$HOME/Library/Caches/CocoaPods" "$HOME/Library/pnpm/store" "$HOME/.npm"; do
   [ -d "$c" ] && [ "$(du -sm "$c" | cut -f1)" -gt 5120 ] && rm -rf "$c"
@@ -206,6 +231,10 @@ if uid=$(id -u "$CI_USER") && launchctl print "gui/$uid" >/dev/null 2>&1; then
         echo "$name: waiting for its current job to finish…"; sleep 15
       done
       launchctl kickstart -k "$svc" && echo "$name: restarted"
+      # The restarted runner uses WORK_ROOT, so the folder it used before can go.
+      if [ -n "$WORK_ROOT" ] && [ -d "$CI_HOME/actions-runners/$name/_work" ]; then
+        rm -rf "${CI_HOME:?}/actions-runners/$name/_work" && echo "$name: removed the old _work"
+      fi
     else
       launchctl bootstrap "gui/$uid" "$CI_HOME/Library/LaunchAgents/com.github.actions-runner.$name.plist" && echo "$name: started"
     fi

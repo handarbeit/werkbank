@@ -27,7 +27,8 @@ of snapshots has held **over 100 GB** of already-deleted data.
   `diskutil apfs addVolume disk3 APFS CI -quota 100g`. A volume in the same container shares free
   space and needs no fixed size; the quota caps runaway use. Docker VMs don't support relocating
   their disk image cleanly, though. Good candidates are agent worktrees and build output, not the
-  VM's own disk.
+  VM's own disk. For the native macOS runners, set `WORK_ROOT` in the conf (below) to put their
+  work folders there; `setup.sh` creates them, owned by the runner user.
 
 ## Native macOS runners (`macos/setup.sh`)
 
