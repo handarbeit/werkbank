@@ -28,7 +28,10 @@ of snapshots has held **over 100 GB** of already-deleted data.
   space and needs no fixed size; the quota caps runaway use. Docker VMs don't support relocating
   their disk image cleanly, though. Good candidates are agent worktrees and build output, not the
   VM's own disk. For the native macOS runners, set `WORK_ROOT` in the conf (below) to put their
-  work folders there; `setup.sh` creates them, owned by the runner user.
+  work folders there; `setup.sh` creates them, owned by the runner user. To keep *all* their churn
+  off the main volume (Xcode DerivedData, simulator devices, package caches, temp files), move the
+  runner user's whole home there: `sudo bash macos/move-ci-home.sh /Volumes/CI/Users`, then re-run
+  `setup.sh` and log the user in again.
 
 ## Native macOS runners (`macos/setup.sh`)
 
