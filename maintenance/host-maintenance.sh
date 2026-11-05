@@ -6,7 +6,7 @@
 # maintenance.env that overrides the settings below (WARN_GB=20, SNAPSHOT_KEEP_HOURS=4, ...).
 #
 # Every run:  (macOS) delete Time Machine local snapshots older than SNAPSHOT_KEEP_HOURS.
-#             check free disk space.
+#             check free disk space on DISKS (the lowest of them counts).
 #   < WARN_GB   notify.
 #   < STOP_GB   stop the Linux runners so CI cannot fill the disk to zero: a full disk can
 #               stop the Docker VM itself and take every runner down mid-job.
@@ -27,6 +27,9 @@ cd "$DIR" || exit 1
 WARN_GB=15
 STOP_GB=5
 START_GB=10
+# Mount points to watch. Add the one that holds Docker's data when it isn't on /, e.g.
+# DISKS="/ /Volumes/CI" (on macOS, OrbStack's storage location; on Linux, Docker's data-root).
+DISKS="/"
 CACHE_MAX_GB=12
 SNAPSHOT_KEEP_HOURS=2
 RUNNER_CHECK_HOURS=6
@@ -51,7 +54,14 @@ notify() {
 }
 # `timeout` is GNU coreutils (Homebrew on macOS); run without a limit where it is missing.
 to() { if command -v timeout >/dev/null; then timeout "$@"; else shift; "$@"; fi; }
-free_gb() { df -Pk / | awk 'NR==2 {print int($4 / 1048576)}'; }
+free_gb() {   # the lowest free space across DISKS, in GB
+  local d f min=
+  for d in $DISKS; do
+    f=$(df -Pk "$d" | awk 'NR==2 {print int($4 / 1048576)}')
+    [ -z "$min" ] || [ "$f" -lt "$min" ] && min=$f
+  done
+  echo "${min:-0}"
+}
 
 # --- Time Machine local snapshots (macOS) ---------------------------------------
 # Time Machine takes an hourly whole-volume snapshot and keeps each for 24 h. Every one pins
