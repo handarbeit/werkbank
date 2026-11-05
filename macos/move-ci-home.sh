@@ -41,13 +41,21 @@ if pgrep -u "$CI_USER" >/dev/null; then
   echo "$CI_USER still has processes:" >&2; pgrep -lu "$CI_USER" >&2; exit 1
 fi
 
-# 3. Copy, keeping owners, permissions, ACLs and extended attributes, then compare.
+# Caches the runners' cleanup agent (setup.sh) deletes anyway; they refill on demand, so don't copy them.
+rm -rf "$old/Library/Developer/Xcode/DerivedData/"* "$old/Library/Developer/CoreSimulator/Caches/"* \
+       "$old/Library/Caches/"* 2>/dev/null || true
+
+# 3. Copy, keeping owners, permissions, ACLs and extended attributes. Some entries can't be copied
+# and needn't be: sockets, and caches macOS protects even from root (CoreSpeech's, for one). Anything
+# else missing from the copy stops the move.
 mkdir -p "$DEST_PARENT"
 echo "copying $old -> $new ($(du -sh "$old" | cut -f1))…"
-ditto "$old" "$new"
-n_old=$(find "$old" | wc -l); n_new=$(find "$new" | wc -l)
-if [ "$n_old" -ne "$n_new" ]; then
-  echo "copy incomplete: $n_old entries in $old, $n_new in $new; the account still uses $old" >&2
+ditto "$old" "$new" || echo "ditto reported errors; checking what wasn't copied…"
+missing=$(comm -23 <(cd "$old" && find . -not -type s 2>/dev/null | sort) \
+                   <(cd "$new" && find . 2>/dev/null | sort) | grep -v '/Caches/' || true)
+if [ -n "$missing" ]; then
+  echo "not copied ($(echo "$missing" | wc -l | tr -d ' ') entries; the account still uses $old):" >&2
+  echo "$missing" | head -20 >&2
   exit 1
 fi
 
