@@ -23,15 +23,30 @@ of snapshots has held **over 100 GB** of already-deleted data.
   `SNAPSHOT_KEEP_HOURS` (default 2), and thins harder below `WARN_GB` free. Backups on the Time
   Machine disk are untouched. Deleting snapshots by date needs no root.
 - **A separate APFS volume** keeps data out of snapshots entirely. Time Machine only snapshots the
-  volumes it backs up, so exclude the whole volume:
-  `diskutil apfs addVolume disk3 APFS CI -quota 100g`. A volume in the same container shares free
-  space and needs no fixed size; the quota caps runaway use. Docker VMs don't support relocating
-  their disk image cleanly, though. Good candidates are agent worktrees and build output, not the
-  VM's own disk. For the native macOS runners, set `WORK_ROOT` in the conf (below) to put their
-  work folders there; `setup.sh` creates them, owned by the runner user. To keep *all* their churn
-  off the main volume (Xcode DerivedData, simulator devices, package caches, temp files), move the
-  runner user's whole home there: `sudo bash macos/move-ci-home.sh /Volumes/CI/Users`, then re-run
-  `setup.sh` and log the user in again.
+  volumes it backs up, so make one and exclude the whole volume:
+  `diskutil apfs addVolume disk3 APFS CI -quota 200g`, then `sudo tmutil addexclusion -v /Volumes/CI`.
+  A volume in the same container shares free space and needs no fixed size; the quota caps runaway
+  use. **Choose the quota up front:** `diskutil` sets one only when it creates the volume, so
+  changing it later means deleting and re-creating the volume. Add the volume to the watchdog's
+  `DISKS` (`DISKS="/ /Volumes/CI"`), or a full volume goes unnoticed while `/` has room. What to put
+  there:
+  - **The Docker VM's data.** In OrbStack, set the storage location (Settings, or
+    `orb config set data_dir /Volumes/CI/OrbStack`) and restart it. **This doesn't move anything:**
+    OrbStack starts empty in the new place and leaves the old data where it was. Stop the runners
+    first, then rebuild the runner image, and carry over anything else you need: images with
+    `docker save` / `docker load`, volumes with a `tar` through a throwaway container. Delete the
+    old data folder once everything checks out. **A re-created cache volume comes back owned by
+    root**, and the runners (non-root) fail with "Permission denied" until it's fixed: run the
+    `chown` recipe in the `volumes:` comment of
+    [examples/mac/compose.yml](../examples/mac/compose.yml).
+  - **The native macOS runners' work folders:** set `WORK_ROOT` in the conf (below); `setup.sh`
+    creates them, owned by the runner user.
+  - **The runner user's whole home**, which keeps *all* their churn off the main volume (Xcode
+    DerivedData, simulator devices, package caches, temp files):
+    `sudo bash macos/move-ci-home.sh /Volumes/CI/Users`, then re-run `setup.sh` and log the user
+    in again. It skips sockets and the caches macOS protects even from root, and keeps the old
+    home as `<home>.old` until you delete it.
+  - Agent worktrees and build output.
 
 ## Native macOS runners (`macos/setup.sh`)
 
@@ -66,7 +81,9 @@ sudo bash werkbank/macos/setup.sh /path/to/macos-runners.conf   # see examples/m
   (it refills on demand), and prune dangling images.
 - **pnpm store repair** ([pnpm.md](pnpm.md)).
 - **Runner upgrades:** rebuild the image when GitHub releases a new Actions runner, and move idle
-  runners onto it ([runners.md](runners.md#runner-versions)). Needs `gh` logged in.
+  runners onto it ([runners.md](runners.md#runner-versions)). It needs `gh` to check that a
+  runner is idle: a `gh` login, or, without one, a token from the overflow controller's config
+  (`overflow.py --token`).
 - **Controller heartbeat:** if the overflow controller's heartbeat is stale, warn and restore any
   shed runners ([overflow.md](overflow.md)).
 

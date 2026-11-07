@@ -26,7 +26,7 @@ a fork's pull request run code on your machine.
 | [`image/`](image/) | The runner image: [`myoung34/github-runner`](https://github.com/myoung34/docker-github-actions-runner) plus what `ubuntu-latest` has and the base lacks (Node 24, Playwright's system libraries, C/C++ build tools), and a start script that wipes the previous job's files |
 | [`compose/runner.yml`](compose/runner.yml) | The shared runner definition your deployment `extends` once per runner |
 | [`bin/roll.sh`](bin/roll.sh) | Recreate runners only once they're idle, so a config change never kills a job |
-| [`controller/`](controller/) | The **overflow controller**: priority tiers across machines, plus host-pressure mode ([docs/overflow.md](docs/overflow.md)) |
+| [`controller/`](controller/) | The **overflow controller**: priority tiers across machines, host-pressure mode, and keeping jobs off a busy overflow host ([docs/overflow.md](docs/overflow.md)) |
 | [`maintenance/`](maintenance/) | The host watchdog: disk space, Time Machine snapshot thinning, runner upgrades, cache hygiene, pnpm store repair, controller heartbeat |
 | [`macos/`](macos/) | Native macOS runners in a dedicated user's GUI session (for Electron, the iOS Simulator) |
 | [`windows/`](windows/) | A native Windows runner as a service, and a sealed WSL2 distro for Linux x64 containers |
@@ -77,7 +77,7 @@ To take a Werkbank upgrade, bump the submodule, read the changelog, and roll:
 - [Runners](docs/runners.md): the ephemeral model, cpusets, heap size, routing, safe restarts,
   light tier, and gotchas.
 - [Overflow and priority tiers](docs/overflow.md): spilling to slower machines only when needed,
-  and host-pressure mode.
+  host-pressure mode, and using a busy overflow host (a workstation, say) last.
 - [pnpm on shared runners](docs/pnpm.md): sharing one store safely, and the action-setup trap.
 - [macOS host](docs/macos-host.md): OrbStack, Time Machine snapshots, native macOS runners.
 - [Windows host](docs/windows-host.md): a service runner, and WSL2 for Linux containers.

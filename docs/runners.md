@@ -102,6 +102,9 @@ image's runner with GitHub's latest release, and if there's a newer one it rebui
 `docker compose build --pull` picks up the base image's new runner, and if the base hasn't caught
 up yet, the build installs the release itself (the Dockerfile's `RUNNER_VERSION` argument). Then,
 every run, it recreates each runner still on the old image once it's idle (`roll.sh --once`).
+`roll.sh` asks GitHub whether a runner is busy, through `gh`. On a host with no `gh` login the
+watchdog borrows a token from the overflow controller's credentials (`overflow.py --token`);
+with neither, every runner looks busy and none is ever moved onto the new image.
 GitHub keeps sending jobs to an older runner for some weeks after a release, so there's no rush.
 
 To upgrade by hand: `docker compose build --pull`, then `bin/roll.sh <service>...`; or pin a

@@ -187,7 +187,8 @@ if [ ! -f "$STATE/stopped-for-disk" ] && [ -z "$(find "$STATE/runner-checked" -m
   fi
 fi
 # Recreate, while idle, every runner whose container isn't on the current image. Needs `gh`
-# (bin/roll.sh checks GitHub's view of each runner); busy ones are retried next run.
+# (bin/roll.sh checks GitHub's view of each runner), logged in or with the controller's token
+# (below); busy ones are retried next run.
 if [ ! -f "$STATE/stopped-for-disk" ] && image_id=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null); then
   stale=$(for svc in $(docker compose config --services 2>/dev/null); do
     for c in $(docker compose ps -q "$svc"); do
