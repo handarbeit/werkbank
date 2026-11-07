@@ -23,6 +23,13 @@ never touched. A shed runner does NOT recover on its own (it is idle, so it neve
 so this loop restores them at startup and on exit, and the host watchdog runs `--restore` if the
 heartbeat goes stale.
 
+Busy overflow hosts. An overflow tier can live on a machine people also work on. With
+`tier_load`, that host reports its 5-minute load every minute (report-load.sh, received by
+receive-load.sh into <state_dir>/load/<tier>). While a tier's load is at or above its `high`,
+until it falls to `low`, its runners go to the back of the line: every other tier is used first.
+With "when_busy": "skip" they are not promoted at all. A report older than max_age_seconds
+(default 180) is ignored, so a reporter that stops leaves the tier as if it weren't busy.
+
 Run:  overflow.py [--config PATH] [--once] [--dry-run] [--restore]
 Config: --config, else $WERKBANK_OVERFLOW_CONFIG, else ./overflow.json (see examples/overflow.json).
 Uses a GitHub App (app_id_var, app_key_var) or an org token (token_var), read from the config's
@@ -51,6 +58,7 @@ SHED = CFG["shed_label"]               # marks a primary runner hidden for host 
 LOAD_HIGH = CFG["pressure_load_high"]  # 5-min load average that starts pressure mode
 LOAD_LOW = CFG["pressure_load_low"]    # ...and that ends it
 REPOS = CFG["repos"]                   # repos whose queues count as demand
+TIER_LOAD = CFG.get("tier_load", {})   # tier -> {"high", "low", "max_age_seconds", "when_busy"}
 DRY = "--dry-run" in sys.argv
 _DEFAULT_STATE = ("~/Library/Application Support/werkbank/overflow" if sys.platform == "darwin"
                   else "~/.local/state/werkbank/overflow")
@@ -186,9 +194,38 @@ def labels(r):
     return {l["name"] for l in r["labels"]}
 
 
-def tier_rank(r):
-    ls = labels(r)
-    return next((i for i, t in enumerate(TIERS) if t in ls), len(TIERS))
+def tier_of(r):
+    return next((t for t in TIERS if t in labels(r)), None)
+
+
+def tier_rank(r, busy=frozenset()):
+    t = tier_of(r)
+    i = TIERS.index(t) if t else len(TIERS)
+    return i + len(TIERS) + 1 if t in busy else i     # a busy tier goes after every other tier
+
+
+def busy_tiers(memo):
+    """Tiers whose host reports a high load, with hysteresis. A stale or missing report counts as not busy."""
+    busy, stale = memo.setdefault("busy_tiers", set()), memo.setdefault("stale_tiers", set())
+    for tier, c in TIER_LOAD.items():
+        try:
+            at, load = (float(x) for x in (STATE / "load" / tier).read_text().split()[:2])
+            fresh = time.time() - at <= c.get("max_age_seconds", 180)
+        except (OSError, ValueError):
+            fresh = False
+        if not fresh:
+            if tier not in stale:
+                log(f"{tier} load report missing or stale; treating {tier} as not busy")
+                stale.add(tier)
+            busy.discard(tier)
+            continue
+        stale.discard(tier)
+        was = tier in busy
+        now = load >= c["high"] or (was and load > c["low"])
+        if now != was:
+            log(f"{tier} host {'busy' if now else 'clear'}: 5-min load {load:.0f}")
+            (busy.add if now else busy.discard)(tier)
+    return busy
 
 
 def promote(r):
@@ -233,7 +270,10 @@ def tick(memo):
     serving = [r for r in rs if WANT in labels(r)]                 # visible to `orb` jobs
     idle = [r for r in serving if not r["busy"]]
     overflow = [r for r in rs if HIDDEN in labels(r)]
-    hidden_idle = sorted((r for r in overflow if WANT not in labels(r) and not r["busy"]), key=tier_rank)
+    busy = busy_tiers(memo)
+    skip = {t for t in busy if TIER_LOAD[t].get("when_busy") == "skip"}
+    hidden_idle = sorted((r for r in overflow if WANT not in labels(r) and not r["busy"]
+                          and tier_of(r) not in skip), key=lambda r: tier_rank(r, busy))
     promoted_idle = [r for r in overflow if WANT in labels(r) and not r["busy"]]
     primary_idle = [r for r in idle if HIDDEN not in labels(r)]
     shed_rs = [r for r in rs if SHED in labels(r)]
@@ -248,7 +288,8 @@ def tick(memo):
     memo["empty_ticks"] = memo.get("empty_ticks", 0) + 1 if queued == 0 else 0
     line = (f"queued={queued} serving={len(serving)} idle={len(idle)} "
             f"overflow={len(overflow)} hidden_idle={len(hidden_idle)} promoted_idle={len(promoted_idle)} "
-            f"shed={len(shed_rs)}" + (" PRESSURE" if memo["pressure"] else ""))
+            f"shed={len(shed_rs)}" + (" PRESSURE" if memo["pressure"] else "")
+            + (f" busy={','.join(sorted(busy))}" if busy else ""))
     if line != memo.get("last"):
         log(line)
         memo["last"] = line

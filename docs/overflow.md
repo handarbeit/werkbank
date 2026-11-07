@@ -47,7 +47,29 @@ restores every shed runner at startup and on SIGTERM, and the watchdog runs
 `python3 controller/overflow.py --config overflow.json --restore`.
 
 The load is read with `os.getloadavg()`, so the controller must run **on the primary host** for
-pressure mode to mean anything.
+pressure mode to mean anything. On a host that runs nothing but CI, its load is CI's own, so leave
+pressure mode off there (thresholds out of reach, e.g. 9999/9998).
+
+## Busy overflow hosts
+
+The opposite case: an overflow tier lives on a machine people also work on, such as a workstation
+that used to be the primary. Lending it jobs while it's busy slows the jobs and the people. With
+`tier_load`, that host reports its load and the controller uses its tier last while it's busy:
+
+- `controller/report-load.sh` sends the host's 5-minute load average over ssh every minute
+  (`controller/install-load-reporter-launchd.sh` installs it as a LaunchAgent; on Linux, a systemd
+  timer or cron line does the same).
+- `controller/receive-load.sh` is the other end: an ssh **forced command** for the controller's
+  account, so the reporter's key can write one load number and nothing else. It stores
+  `<state_dir>/load/<tier>`, stamped with the controller host's clock. In that account's
+  `~/.ssh/authorized_keys`:
+  `command="/path/to/werkbank/controller/receive-load.sh /path/to/state_dir",restrict ssh-ed25519 AAAA... load reporter`
+- While a tier's load is at or above `high` (until it falls to `low`), its runners go **after every
+  other tier**: still used, so no job waits while a runner is free, but only once the others are
+  full. With `"when_busy": "skip"` they aren't promoted at all.
+- A report older than `max_age_seconds` (default 180) is ignored, so if the reporter stops, the
+  tier behaves as if it weren't busy. The controller logs when a tier turns busy or clear, and
+  when its report goes missing or stale.
 
 ## Config (`overflow.json`)
 
@@ -61,9 +83,10 @@ pressure mode to mean anything.
 | `overflow_tiers` | Tier labels, best first |
 | `shed_label` | Marks a primary runner hidden for host pressure (`orb-shed`) |
 | `pressure_load_high`, `pressure_load_low` | 5-minute load average that starts and ends pressure mode. Start around 1.5x the core count for high and 1x for low, then tune |
+| `tier_load` | Optional, per tier: `{"tier-2": {"high": 40, "low": 25}}`, plus `max_age_seconds` (default 180) and `when_busy` (`"last"`, the default, or `"skip"`). See "Busy overflow hosts" |
 | `repos` | Repos whose queues count as demand. **Add every repo that uses the pool**, or its queue is invisible to the controller |
 | `interval_seconds`, `promote_after_ticks`, `demote_after_ticks` | Timing |
-| `state_dir` | Where the heartbeat goes (default `~/Library/Application Support/werkbank/overflow` on macOS, `~/.local/state/werkbank/overflow` elsewhere) |
+| `state_dir` | Where the heartbeat and the load reports (`load/<tier>`) go (default `~/Library/Application Support/werkbank/overflow` on macOS, `~/.local/state/werkbank/overflow` elsewhere) |
 
 ## Running it
 
