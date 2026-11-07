@@ -1,7 +1,7 @@
 # Werkbank
 
 **Self-hosted GitHub Actions runners on machines you already have**: ephemeral Linux containers
-on a Mac (OrbStack or Docker Desktop) or in WSL2 on Windows, native macOS and Windows runners,
+on a dedicated Linux box, on a Mac (OrbStack or Docker Desktop) or in WSL2 on Windows, native macOS and Windows runners,
 and a small controller that routes jobs to your fastest machine first and spills over to slower
 ones only when it's busy.
 
