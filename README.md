@@ -58,6 +58,14 @@ werkbank/maintenance/install-launchd.sh "$PWD"                   # the watchdog 
 werkbank/controller/install-launchd.sh "$PWD/overflow.json"      # the controller, if you use tiers
 ```
 
+On a dedicated Linux box, the same as the service user (linger on), with
+[`examples/linux/`](examples/linux/) as the starting point:
+
+```bash
+werkbank/maintenance/install-systemd.sh "$PWD"                   # the watchdog (systemd user timer)
+werkbank/controller/install-systemd.sh "$PWD/overflow.json"      # the controller (systemd user service)
+```
+
 Then point workflows at the runners with a repo variable and a hosted fallback:
 
 ```yaml
@@ -79,13 +87,15 @@ To take a Werkbank upgrade, bump the submodule, read the changelog, and roll:
 - [Overflow and priority tiers](docs/overflow.md): spilling to slower machines only when needed,
   host-pressure mode, and using a busy overflow host (a workstation, say) last.
 - [pnpm on shared runners](docs/pnpm.md): sharing one store safely, and the action-setup trap.
+- [Linux host](docs/linux-host.md): a dedicated box with Docker Engine, Docker's data on its own
+  drive, cpusets of SMT siblings, the service user, and running unattended.
 - [macOS host](docs/macos-host.md): OrbStack, Time Machine snapshots, native macOS runners.
 - [Windows host](docs/windows-host.md): a service runner, and WSL2 for Linux containers.
 
 ## Status
 
-Werkbank is extracted from a working setup: a Mac Studio and a Windows PC serving a busy
-GitHub org around the clock. Expect rough edges outside that shape, and please open issues.
+Werkbank is extracted from a working setup: a dedicated Linux box as the first tier, with a Mac
+Studio and a Windows PC as overflow, serving a busy GitHub org around the clock. Expect rough edges outside that shape, and please open issues.
 
 ## Licence
 

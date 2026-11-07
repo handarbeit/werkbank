@@ -1,0 +1,44 @@
+# Example deployment: Linux runners on a dedicated Linux box (Docker Engine, no VM) for one GitHub
+# org, here 16 cores / 32 threads where core N's SMT sibling is N+16 (check yours with `lscpu -e`).
+# In a real deployment, werkbank is a git submodule and `file:` below is werkbank/compose/runner.yml;
+# here it points back into this repo so the example validates. See docs/linux-host.md.
+#
+#   docker compose config      # check it
+#   docker compose up -d       # first start; afterwards recreate with werkbank/bin/roll.sh
+#
+# One runner per cpuset of whole cores plus their SMT siblings, never across a CCD (cores 0-7 and
+# 8-15 here). Node's availableParallelism() reports the cpuset, so test pools size to it. 8 threads
+# per runner finished a heavy test suite in about half the time 4 threads took; 4 runners of 8 run
+# fewer jobs at once than 8 of 4. Measure your heaviest job before choosing.
+
+x-runner: &runner
+  extends: { file: ../../compose/runner.yml, service: runner }
+  # 4 x 14 GB on a 64 GB box. Caps, not reservations.
+  mem_limit: 14g
+  # No swap for jobs: by default a container may swap as much again, onto the host's swap.
+  memswap_limit: 14g
+  # Each credential is named here; no `env_file: .env`, which would hand every variable to jobs.
+  environment:
+    RUNNER_SCOPE: org
+    ORG_NAME: my-org
+    # A GitHub App, not a personal token (docs/github-app.md).
+    APP_ID: "123456"
+    APP_PRIVATE_KEY: ${MY_APP_KEY}   # from .env; see .env.example
+    APP_LOGIN: my-org
+    # This box is tier 1, so its runners carry the routing label. Overflow hosts carry
+    # `orb-overflow` and a tier label instead (docs/overflow.md).
+    LABELS: orb,orb-x64
+    RUNNER_NAME_PREFIX: linux-my-org
+
+services:
+  pool-1: { <<: *runner, cpuset: "0-3,16-19" }
+  pool-2: { <<: *runner, cpuset: "4-7,20-23" }
+  pool-3: { <<: *runner, cpuset: "8-11,24-27" }
+  pool-4: { <<: *runner, cpuset: "12-15,28-31" }
+
+volumes:
+  # Create it owned by `runner` (jobs run non-root) before the first start:
+  #   docker volume create <project>_runner-caches
+  #   docker run --rm -v <project>_runner-caches:/caches --entrypoint sh werkbank-runner:local \
+  #     -c 'mkdir -p /caches/pnpm-store /caches/ms-playwright && chown -R runner:runner /caches'
+  runner-caches:
