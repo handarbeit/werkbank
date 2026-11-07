@@ -204,8 +204,10 @@ if [ ! -f "$STATE/stopped-for-disk" ] && image_id=$(docker image inspect -f '{{.
       tok=$(/usr/bin/python3 "$WERKBANK/controller/overflow.py" --config "$OVERFLOW_CONFIG" --token 2>/dev/null) \
         || log "runner upgrade: no gh login, and no token from $OVERFLOW_CONFIG"
     fi
+    # Exported in a subshell, not passed on a command line, so the token never shows in ps.
     # shellcheck disable=SC2086
-    env ${tok:+GH_TOKEN="$tok"} WERKBANK_DEPLOY="$DIR" "$WERKBANK/bin/roll.sh" --once $stale 2>&1 | grep -v 'busy, skipped' \
+    ( [ -z "$tok" ] || export GH_TOKEN="$tok"
+      WERKBANK_DEPLOY="$DIR" "$WERKBANK/bin/roll.sh" --once $stale 2>&1 ) | grep -v 'busy, skipped' \
       | while read -r line; do log "runner upgrade: $line"; done
   fi
 fi
