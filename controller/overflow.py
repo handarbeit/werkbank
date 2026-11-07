@@ -30,7 +30,9 @@ until it falls to `low`, its runners go to the back of the line: every other tie
 With "when_busy": "skip" they are not promoted at all. A report older than max_age_seconds
 (default 180) is ignored, so a reporter that stops leaves the tier as if it weren't busy.
 
-Run:  overflow.py [--config PATH] [--once] [--dry-run] [--restore]
+Run:  overflow.py [--config PATH] [--once] [--dry-run] [--restore] [--token]
+--token prints a GitHub token from the config's credentials (an App installation token, valid for
+an hour) and exits, so other tools on the host can use `gh` without a personal login.
 Config: --config, else $WERKBANK_OVERFLOW_CONFIG, else ./overflow.json (see examples/overflow.json).
 Uses a GitHub App (app_id_var, app_key_var) or an org token (token_var), read from the config's
 env_file (default: .env next to the config): reads go straight to the REST API, writes through
@@ -323,6 +325,10 @@ def tick(memo):
 def main():
     # launchd stops the agent with SIGTERM; turn it into SystemExit so the shutdown restore runs.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    if "--token" in sys.argv:                      # for the watchdog's roll.sh on a host with no gh login
+        ensure_token()
+        print(os.environ["GH_TOKEN"])
+        return
     if "--restore" in sys.argv:                    # used by the watchdog when this loop is down
         restore_all("restore requested")
         return

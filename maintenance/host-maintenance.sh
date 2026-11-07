@@ -196,8 +196,16 @@ if [ ! -f "$STATE/stopped-for-disk" ] && image_id=$(docker image inspect -f '{{.
     done
   done)
   if [ -n "$stale" ]; then
+    # With no gh login on the host, borrow the overflow controller's credentials (a GitHub App
+    # installation token, good for an hour) for this one call. Otherwise roll.sh can't see that a
+    # runner is idle, and every runner counts as busy forever.
+    tok=
+    if ! gh auth status >/dev/null 2>&1 && [ -f "$OVERFLOW_CONFIG" ]; then
+      tok=$(/usr/bin/python3 "$WERKBANK/controller/overflow.py" --config "$OVERFLOW_CONFIG" --token 2>/dev/null) \
+        || log "runner upgrade: no gh login, and no token from $OVERFLOW_CONFIG"
+    fi
     # shellcheck disable=SC2086
-    WERKBANK_DEPLOY="$DIR" "$WERKBANK/bin/roll.sh" --once $stale 2>&1 | grep -v 'busy, skipped' \
+    env ${tok:+GH_TOKEN="$tok"} WERKBANK_DEPLOY="$DIR" "$WERKBANK/bin/roll.sh" --once $stale 2>&1 | grep -v 'busy, skipped' \
       | while read -r line; do log "runner upgrade: $line"; done
   fi
 fi

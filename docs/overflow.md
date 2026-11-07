@@ -97,7 +97,9 @@ controller/install-launchd.sh /path/to/overflow.json                     # macOS
 controller/install-systemd.sh /path/to/overflow.json                     # Linux user service
 ```
 
-It needs the `gh` CLI (for label changes). A tick reads the runner list, each repo's queued and
+It needs the `gh` CLI (for label changes), but no `gh` login: it hands `gh` its own token.
+`overflow.py --config overflow.json --token` prints one (an App installation token lasts an hour).
+The host watchdog uses it so `bin/roll.sh` works on a host with no login. A tick reads the runner list, each repo's queued and
 in-progress runs, and every such run's jobs, which used to come to thousands of calls an hour on a
 busy org: enough to exhaust a token's 5,000-an-hour quota, which it shares with everything else
 using that token. Reads are now conditional, and GitHub doesn't charge for an unchanged answer
