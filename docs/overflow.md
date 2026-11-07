@@ -63,7 +63,8 @@ that used to be the primary. Lending it jobs while it's busy slows the jobs and 
   account, so the reporter's key can write one load number and nothing else. It stores
   `<state_dir>/load/<tier>`, stamped with the controller host's clock. In that account's
   `~/.ssh/authorized_keys`:
-  `command="/path/to/werkbank/controller/receive-load.sh /path/to/state_dir",restrict ssh-ed25519 AAAA... load reporter`
+  `command="/path/to/werkbank/controller/receive-load.sh /path/to/state_dir tier-2",restrict ssh-ed25519 AAAA... load reporter`.
+  The last argument pins the key to that tier.
 - While a tier's load is at or above `high` (until it falls to `low`), its runners go **after every
   other tier**: still used, so no job waits while a runner is free, but only once the others are
   full. With `"when_busy": "skip"` they aren't promoted at all.
