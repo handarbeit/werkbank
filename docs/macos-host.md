@@ -69,6 +69,11 @@ sudo bash werkbank/macos/setup.sh /path/to/macos-runners.conf   # see examples/m
   each iOS build leaves gigabytes of DerivedData and simulators behind.
 - Registration tokens are passed to `curl` on stdin, not the command line, where any user's `ps`
   could see them.
+- **More than one runner per org or repo:** write the entry as `my-org*2`. The runners share one
+  user, one home and one GUI session, so two jobs can run side by side only if they don't collide
+  there: fixed ports, a single-instance app lock in a shared profile directory, build output at a
+  fixed path under `$HOME` (key it by `$RUNNER_NAME`), or a step that shuts down every simulator
+  (`xcrun simctl shutdown all`). The cleanup agent already waits until no runner has a job.
 
 ## The watchdog (`maintenance/`)
 

@@ -5,7 +5,7 @@
 #
 # The conf file (bash; see examples/mac/macos-runners.conf) sets TARGETS, and optionally CI_USER,
 # LABEL, RETIRED, APPS, TOKEN_VARS, ENV_FILE and WORK_ROOT. Creates the `ci` account (asks for its password),
-# installs one runner per entry in TARGETS under /Users/ci/actions-runners/<name>, and a
+# installs the runners TARGETS asks for (one per entry, or N for "entry*N") under /Users/ci/actions-runners/<name>, and a
 # LaunchAgent that starts them when `ci` logs in. Jobs need a GUI session (Electron windows, the
 # iOS Simulator), which a LaunchDaemon cannot give them — so after this, log
 # `ci` in once via fast user switching and switch back; it keeps running.
@@ -16,6 +16,8 @@
 # gets no local snapshots (docs/macos-host.md). Setting or changing it moves existing runners too.
 # A TARGETS entry is a repo (owner/name, a repo-level runner) or an org (name
 # alone, a runner in that org's pool: it serves every private repo there).
+# Append *N for N runners there (my-org*2): the first keeps the plain name, the
+# others are <name>-2 .. <name>-N, so going from one runner to two leaves the first alone.
 # Registration tokens come from ENV_FILE (default: .env next to the conf): a GitHub
 # App's, if APPS has the target's owner (docs/github-app.md), else the PAT in the
 # variable TOKEN_VARS names for the owner, else ACCESS_TOKEN; nothing is printed. RETIRED names are runners that used to be installed here: their
@@ -36,6 +38,15 @@ WORK_ROOT=""             # e.g. /Volumes/CI/actions-runners; empty: _work inside
 # shellcheck disable=SC1090
 . "$CONF"
 [ ${#TARGETS[@]} -gt 0 ] || { echo "no TARGETS in $CONF" >&2; exit 1; }
+# Expand "target*N" into one "target|name" entry per runner.
+expanded=()
+for t in "${TARGETS[@]}"; do
+  n=1; case "$t" in *\**) n=${t##*\*}; t=${t%\**};; esac
+  case "$n" in ''|*[!0-9]*|0) echo "bad runner count in TARGETS entry '$t*$n'" >&2; exit 1;; esac
+  base=${t#*/}; expanded+=("$t|$base")
+  for ((i = 2; i <= n; i++)); do expanded+=("$t|$base-$i"); done
+done
+TARGETS=("${expanded[@]}")
 
 [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
 env_val() {            # a value from ENV_FILE, quotes stripped
@@ -72,7 +83,8 @@ token_for() {          # a token that may register runners for this target
   [ -n "$t" ] || { echo "no $var in $ENV_FILE" >&2; exit 1; }
   echo "$t"
 }
-name_of() { echo "${1#*/}"; }                   # owner/repo -> repo, org -> org
+name_of()   { echo "${1#*|}"; }                 # "target|name" -> the runner's name
+target_of() { echo "${1%%|*}"; }                # "target|name" -> owner/repo or org
 work_of() { if [ -n "$WORK_ROOT" ]; then echo "$WORK_ROOT/$1"; else echo _work; fi; }
 api_of()  { case "$1" in */*) echo "repos/$1";; *) echo "orgs/$1";; esac; }
 
@@ -114,7 +126,8 @@ JOB_PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/
 for target in "${TARGETS[@]}"; do
   name=$(name_of "$target")
   dir="$CI_HOME/actions-runners/$name"
-  if [ -f "$dir/.runner" ]; then echo "$target: already configured"; continue; fi
+  if [ -f "$dir/.runner" ]; then echo "$name: already configured"; continue; fi
+  target=$(target_of "$target")
   as_ci mkdir -p "$dir"
   as_ci tar xzf "$pkg" -C "$dir"
   # The header goes in on stdin (-H @-): on the command line, the token would show
@@ -124,7 +137,7 @@ for target in "${TARGETS[@]}"; do
   as_ci bash -c "cd '$dir' && ./config.sh --unattended --replace \
     --url 'https://github.com/$target' --token '$reg' \
     --name '$(scutil --get LocalHostName)-$name' --labels '$LABEL' --work '$(work_of "$name")' >/dev/null"
-  echo "$target: registered"
+  echo "$name: registered ($target)"
 done
 
 # Work folders. A runner reads workFolder from .runner (and .runner_migrated, its copy since
