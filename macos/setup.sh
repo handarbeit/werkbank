@@ -85,6 +85,21 @@ token_for() {          # a token that may register runners for this target
 }
 name_of()   { echo "${1#*|}"; }                 # "target|name" -> the runner's name
 target_of() { echo "${1%%|*}"; }                # "target|name" -> owner/repo or org
+# Is this runner (by name; optionally its target, to ask GitHub too) running a job?
+# A runner that has updated itself runs from bin.<version>, which its bin symlink points
+# at, so the job process is .../<name>/bin.2.338.2/Runner.Worker, not .../<name>/bin/:
+# match both. GitHub's `busy` also covers the seconds between a job being assigned and
+# Runner.Worker starting (bin/roll.sh checks the same two things).
+runner_busy() {
+  local b
+  pgrep -u "$CI_USER" -f "actions-runners/$1/bin(\.[0-9.]+)?/Runner\.Worker" >/dev/null && return 0
+  [ -n "${2:-}" ] || return 1
+  b=$(printf 'Authorization: Bearer %s\n' "$(token_for "$2")" | curl -fsSL -H @- \
+    "https://api.github.com/$(api_of "$2")/actions/runners?per_page=100" \
+    | /usr/bin/jq -r --arg n "$(scutil --get LocalHostName)-$1" '.runners[] | select(.name == $n) | .busy') \
+    || return 1
+  [ "$b" = true ]
+}
 work_of() { if [ -n "$WORK_ROOT" ]; then echo "$WORK_ROOT/$1"; else echo _work; fi; }
 api_of()  { case "$1" in */*) echo "repos/$1";; *) echo "orgs/$1";; esac; }
 
@@ -105,7 +120,7 @@ uid=$(id -u "$CI_USER")
 for name in ${RETIRED[@]+"${RETIRED[@]}"}; do
   plist="$CI_HOME/Library/LaunchAgents/com.github.actions-runner.$name.plist"
   [ -e "$plist" ] || [ -d "$CI_HOME/actions-runners/$name" ] || continue
-  while pgrep -u "$CI_USER" -f "actions-runners/$name/bin/Runner.Worker" >/dev/null; do
+  while runner_busy "$name"; do
     echo "$name: waiting for its current job to finish before retiring it…"; sleep 15
   done
   launchctl bootout "gui/$uid/com.github.actions-runner.$name" 2>/dev/null || true
@@ -198,7 +213,7 @@ as_ci tee "$CI_HOME/bin/ci-cleanup.sh" >/dev/null <<'EOF'
 #!/bin/bash
 # Installed by werkbank's macos/setup.sh (runs as ci; see there).
 export PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
-if pgrep -u "$(id -u)" -f 'bin/Runner.Worker' >/dev/null; then
+if pgrep -u "$(id -u)" -f 'Runner\.Worker' >/dev/null; then   # any runner, whichever bin.<version> it runs from
   echo "$(date '+%F %T') skipped: a job is running"; exit 0
 fi
 before=$(df -g / | awk 'NR==2 {print $4}')
@@ -240,7 +255,7 @@ if uid=$(id -u "$CI_USER") && launchctl print "gui/$uid" >/dev/null 2>&1; then
     name=$(name_of "$target")
     svc="gui/$uid/com.github.actions-runner.$name"
     if launchctl print "$svc" >/dev/null 2>&1; then
-      while pgrep -u "$CI_USER" -f "actions-runners/$name/bin/Runner.Worker" >/dev/null; do
+      while runner_busy "$name" "$(target_of "$target")"; do
         echo "$name: waiting for its current job to finish…"; sleep 15
       done
       launchctl kickstart -k "$svc" && echo "$name: restarted"
