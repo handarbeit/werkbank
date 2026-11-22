@@ -117,15 +117,22 @@ docker compose ps --format '{{.Name}} {{.Status}}'
 Step 'keep-alive task'
 # conhost --headless: without it the task opens a console window on the desktop.
 $action  = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless wsl.exe -d $Distro -u root -- sleep infinity"
-# Log on, plus every 5 minutes: if anything stops the VM (`wsl --shutdown`, a WSL update, sleep) the
-# holder dies with it, and the next tick starts it again (IgnoreNew skips the tick while it lives).
+# Boot, log on, plus every 5 minutes: if anything stops the VM (`wsl --shutdown`, a WSL update,
+# sleep) the holder dies with it, and the next tick starts it again (IgnoreNew skips the tick while
+# it lives).
 $trigger = @(
+  (New-ScheduledTaskTrigger -AtStartup),
   (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME),
   (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5))
 )
+# S4U: run whether or not anyone is logged on, with no stored password, so after a power cut the
+# runners come back at boot rather than at the next logon. WSL runs per user, so it stays this
+# user's distro, shared with their own sessions. Tested: the distro, Docker and the runners all
+# start from session 0.
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Limited
 $set     = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -Hidden -MultipleInstances IgnoreNew `
              -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-Register-ScheduledTask -TaskName "$Distro WSL keep-alive" -Action $action -Trigger $trigger -Settings $set -Force | Out-Null
+Register-ScheduledTask -TaskName "$Distro WSL keep-alive" -Action $action -Trigger $trigger -Principal $principal -Settings $set -Force | Out-Null
 Start-ScheduledTask -TaskName "$Distro WSL keep-alive"
 
 Step 'done'

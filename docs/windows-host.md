@@ -46,8 +46,10 @@ own**:
   machine. The script backs it up, and applying a new one restarts the VM, so only do that while
   its runners are idle.
 - **A keep-alive task.** Even with the VM up, a distro stops once no `wsl.exe` session holds it. A
-  scheduled task (at logon and every 5 minutes, headless via `conhost --headless`) holds one open
-  and starts it again if anything stops it.
+  scheduled task (at boot, at logon and every 5 minutes, headless via `conhost --headless`) holds
+  one open and starts it again if anything stops it. It runs as S4U ("whether the user is logged on
+  or not", no stored password), so after a power cut the runners come back without anyone logging
+  in. Before this, they waited for the next logon.
 - **Docker Engine inside the distro**, not Docker Desktop.
 - Can be torn down with `wsl --unregister <distro>` without touching anything else.
 
