@@ -91,6 +91,8 @@ To take a Werkbank upgrade, bump the submodule, read the changelog, and roll:
   drive, cpusets of SMT siblings, the service user, and running unattended.
 - [macOS host](docs/macos-host.md): OrbStack, Time Machine snapshots, native macOS runners.
 - [Windows host](docs/windows-host.md): a service runner, and WSL2 for Linux containers.
+- [Alerts](docs/alerts.md): what the watchdog reports, Pushover on your phone, and hosts watching
+  each other's runners so one going down is noticed.
 
 ## Status
 

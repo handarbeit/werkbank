@@ -14,6 +14,9 @@
 # Every RUNNER_CHECK_HOURS: if GitHub has released a newer Actions runner than the image has,
 #             rebuild the image (docs/runners.md, "Runner versions").
 # Every run:  recreate runners still on an older image, each only while idle (bin/roll.sh --once).
+# Every run:  (optional) check that other hosts' runners are online: EXPECT_RUNNERS, below.
+# Alerts:     a desktop notification on macOS, the journal on Linux, and, with PUSHOVER_TOKEN and
+#             PUSHOVER_USER in .env, a push to Pushover (docs/alerts.md).
 # Once a day, only while no runner is mid-job:
 #   the shared cache volume is wiped if it exceeds CACHE_MAX_GB (it refills
 #   on demand), and dangling Docker images are pruned.
@@ -45,12 +48,48 @@ else STATE="${XDG_STATE_HOME:-$HOME/.local/state}/werkbank"; fi
 mkdir -p "$STATE"
 
 log()    { echo "$(date '+%F %T') $*"; }
+# A value from .env, read without sourcing it (.env is compose's file, not shell).
+env_get() { grep -s "^$1=" .env | tail -1 | cut -d= -f2- | sed -e "s/^[\"']//" -e "s/[\"']\$//"; }
+PUSHOVER_TOKEN=${PUSHOVER_TOKEN:-$(env_get PUSHOVER_TOKEN)}
+PUSHOVER_USER=${PUSHOVER_USER:-$(env_get PUSHOVER_USER)}
+HOST_LABEL=${HOST_LABEL:-$(hostname -s)}
+# notify MESSAGE [PRIORITY]: PRIORITY is Pushover's (-2..1; default 0). 1 is for "CI is down" alerts.
 notify() {
   if command -v osascript >/dev/null; then
     osascript -e "display notification \"$1\" with title \"CI runners\"" >/dev/null 2>&1 || true
   else
     command -v logger >/dev/null && logger -t werkbank "$1"
   fi
+  [ -n "$PUSHOVER_TOKEN" ] && [ -n "$PUSHOVER_USER" ] || return 0
+  # The keys go to curl on stdin (-K -), not on its command line, so they never show in ps.
+  printf 'form-string = "token=%s"\nform-string = "user=%s"\n' "$PUSHOVER_TOKEN" "$PUSHOVER_USER" \
+    | curl -fsS --max-time 20 -o /dev/null -K - \
+        --form-string "title=CI runners: $HOST_LABEL" --form-string "message=$1" \
+        --form-string "priority=${2:-0}" https://api.pushover.net/1/messages.json \
+    || log "pushover: could not send: $1"
+}
+# A token for `gh`: none if gh is logged in, else an App installation token minted from the
+# overflow controller's config (good for an hour). Empty, and logged, if neither is available.
+gh_token() {
+  gh auth status >/dev/null 2>&1 && return 0
+  [ -f "$OVERFLOW_CONFIG" ] && /usr/bin/python3 "$WERKBANK/controller/overflow.py" --config "$OVERFLOW_CONFIG" --token 2>/dev/null && return 0
+  log "no gh login, and no token from $OVERFLOW_CONFIG" >&2
+}
+# Run a command a given number of runs in a row before acting, then once on recovery:
+#   streak NAME true|false  -> prints "alert" on the run the streak reaches STREAK_RUNS,
+#                              "recovered" on the first good run after an alert.
+STREAK_RUNS=2
+streak() {
+  local f="$STATE/streak-$1" n
+  n=$(cat "$f" 2>/dev/null || echo 0)
+  if [ "$2" = true ]; then
+    n=$((n + 1)); echo "$n" > "$f"
+    [ "$n" -eq "$STREAK_RUNS" ] && echo alert
+  else
+    rm -f "$f"
+    [ "$n" -ge "$STREAK_RUNS" ] && echo recovered
+  fi
+  return 0
 }
 # `timeout` is GNU coreutils (Homebrew on macOS); run without a limit where it is missing.
 to() { if command -v timeout >/dev/null; then timeout "$@"; else shift; "$@"; fi; }
@@ -77,7 +116,39 @@ free_gb() {   # the lowest free space across DISKS, in GB
   fi
 done
 
-docker info >/dev/null 2>&1 || { log "docker not reachable; skipping"; exit 0; }
+# --- other hosts' runners (optional) ------------------------------------------------
+# A host that is down can't say so, so each host can watch the others' runners on GitHub.
+# EXPECT_RUNNERS (in maintenance.env) has one line per group: "<API scope> <name prefix> <minimum>":
+#   EXPECT_RUNNERS="orgs/my-org other-host- 4
+#   repos/me/my-app my-mac-app 1"
+# When fewer than <minimum> runners whose name starts with <name prefix> are online on
+# STREAK_RUNS runs in a row (ephemeral runners are briefly unregistered between jobs), notify
+# once at priority 1; notify again when they are back. A failed GitHub call counts as neither.
+if [ -n "${EXPECT_RUNNERS:-}" ]; then
+  tok=$(gh_token)
+  while read -r scope prefix min; do
+    [ -n "$scope" ] && [ -n "$prefix" ] && [ -n "$min" ] || continue
+    online=$( ( [ -z "$tok" ] || export GH_TOKEN="$tok"
+      gh api --paginate "$scope/actions/runners?per_page=100" \
+        --jq "[.runners[] | select(.status == \"online\" and (.name | startswith(\"$prefix\")))] | length" ) 2>/dev/null) \
+      || { log "expected runners: GitHub call failed for $scope"; continue; }
+    online=$(echo "$online" | awk '{ n += $1 } END { print n + 0 }')
+    key=$(printf '%s' "expect $scope $prefix" | tr -c 'A-Za-z0-9_.-' _)
+    case $(streak "$key" "$([ "$online" -lt "$min" ] && echo true || echo false)") in
+      alert)     log "expected runners: $prefix* has $online online (want $min)"
+                 notify "Runners down: $prefix* has $online of $min online." 1 ;;
+      recovered) log "expected runners: $prefix* back ($online online)"
+                 notify "Runners back: $prefix* has $online online." ;;
+    esac
+  done <<< "$EXPECT_RUNNERS"
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  log "docker not reachable; skipping"
+  [ "$(streak docker-down true)" = alert ] && notify "Docker is not reachable; this host's Linux runners are down." 1
+  exit 0
+fi
+[ "$(streak docker-down false)" = recovered ] && notify "Docker is reachable again."
 
 busy_runners() {
   for c in $(docker compose ps -q 2>/dev/null); do
@@ -100,7 +171,7 @@ if [ "$free" -lt "$STOP_GB" ]; then
     docker compose stop -t 60 >/dev/null 2>&1
     touch "$STATE/stopped-for-disk"
     log "free ${free}G < ${STOP_GB}G: Linux runners STOPPED"
-    notify "Disk nearly full (${free} GB free). Linux CI runners stopped until space is freed."
+    notify "Disk nearly full (${free} GB free). Linux CI runners stopped until space is freed." 1
   fi
 elif [ -f "$STATE/stopped-for-disk" ] && [ "$free" -ge "$START_GB" ]; then
   docker compose up -d >/dev/null 2>&1
@@ -149,7 +220,7 @@ if [ -f "$hb" ] && [ -n "$(find "$hb" -mmin +5 2>/dev/null)" ]; then
   if [ -z "$(find "$STATE/overflow-warned" -mmin -60 2>/dev/null)" ]; then
     touch "$STATE/overflow-warned"
     log "overflow controller heartbeat is stale: $(cat "$hb")"
-    notify "CI overflow controller has stopped; slower runners stay hidden until it is back."
+    notify "CI overflow controller has stopped; slower runners stay hidden until it is back." 1
   fi
 fi
 
@@ -200,11 +271,7 @@ if [ ! -f "$STATE/stopped-for-disk" ] && image_id=$(docker image inspect -f '{{.
     # With no gh login on the host, borrow the overflow controller's credentials (a GitHub App
     # installation token, good for an hour) for this one call. Otherwise roll.sh can't see that a
     # runner is idle, and every runner counts as busy forever.
-    tok=
-    if ! gh auth status >/dev/null 2>&1 && [ -f "$OVERFLOW_CONFIG" ]; then
-      tok=$(/usr/bin/python3 "$WERKBANK/controller/overflow.py" --config "$OVERFLOW_CONFIG" --token 2>/dev/null) \
-        || log "runner upgrade: no gh login, and no token from $OVERFLOW_CONFIG"
-    fi
+    tok=$(gh_token)
     # Exported in a subshell, not passed on a command line, so the token never shows in ps.
     # shellcheck disable=SC2086
     ( [ -z "$tok" ] || export GH_TOKEN="$tok"

@@ -91,5 +91,7 @@ sudo bash werkbank/macos/setup.sh /path/to/macos-runners.conf   # see examples/m
   (`overflow.py --token`).
 - **Controller heartbeat:** if the overflow controller's heartbeat is stale, warn and restore any
   shed runners ([overflow.md](overflow.md)).
+- **Other hosts' runners** (optional, `EXPECT_RUNNERS`): alert when another host's runners are
+  missing on GitHub. Alerts can also go to Pushover ([alerts.md](alerts.md)).
 
 Override any setting in `maintenance.env` in the deployment directory.

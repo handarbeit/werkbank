@@ -125,7 +125,9 @@ werkbank/maintenance/install-systemd.sh /opt/my-ci                      # timer:
   pinned to its tier. Leave **host pressure** off on a box that runs nothing but CI: its load is the
   runners' own, so it would only shed runners because of their jobs.
 - On Linux the watchdog's alerts go to the journal (`logger -t werkbank`), not to a desktop. Its
-  actions (stopping runners on a full disk, restoring after a stale controller) still happen.
+  actions (stopping runners on a full disk, restoring after a stale controller) still happen. Add
+  Pushover keys to `.env` to get them on a phone, and `EXPECT_RUNNERS` so this box reports other
+  hosts going down ([alerts.md](alerts.md)).
 
 ## Running unattended
 
