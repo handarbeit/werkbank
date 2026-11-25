@@ -72,9 +72,18 @@ x-org: &org
 ```
 
 Name each credential per service, as above. **Don't give the services `env_file: .env`**: that
-puts every variable in `.env` into every container, and the image clears only its own variables
-(`ACCESS_TOKEN`, `APP_*`) before a job starts, so any job step, or any dependency's install
-script, could read the rest.
+puts every variable in `.env` into every container, and the image keeps only its own variables
+(`ACCESS_TOKEN`, `APP_*`) out of the jobs' environment, so any job step, or any dependency's
+install script, could read the rest.
+
+### What a job can see
+
+Jobs don't inherit the credentials, but they are still in the container's starting environment,
+and jobs have passwordless sudo (as on `ubuntu-latest`), so a job can read them:
+`sudo cat /proc/1/environ`. Any workflow, or any dependency's install script, in any repo that
+can use these runners can therefore take the App's private key. That is one reason to keep public
+repos off them. Keeping the key out of the containers altogether (the host would mint a
+single-use just-in-time runner config for each container) is planned.
 
 Recreate the runners with `werkbank/bin/roll.sh` and check one:
 

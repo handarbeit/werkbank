@@ -227,9 +227,10 @@ fi
 # --- runner upgrades ---------------------------------------------------------
 # Runners don't update themselves (DISABLE_AUTO_UPDATE, compose/runner.yml): an ephemeral
 # container's self-update can leave it with no runner. GitHub stops sending jobs to a runner some
-# weeks after a newer release, so the image follows releases here instead: build --pull picks up
-# the base image's new runner, and if the base hasn't caught up yet, the Dockerfile installs the
-# release itself (RUNNER_VERSION).
+# weeks after a newer release, so the image follows releases here instead: it is rebuilt on
+# GitHub's official runner image for the new release, pinned to the digest that release's tag
+# has now (bin/pin-base.sh --print). GitHub publishes that image with the release; until it
+# appears, the rebuild waits for the next check.
 runner_version() {
   docker run --rm --entrypoint sh "$IMAGE" -c \
     'grep -o "\"Runner.Listener/[0-9.]*\"" /actions-runner/bin/Runner.Listener.deps.json | head -1' 2>/dev/null \
@@ -242,12 +243,18 @@ if [ ! -f "$STATE/stopped-for-disk" ] && [ -z "$(find "$STATE/runner-checked" -m
   if [ -n "$latest" ] && [ -n "$current" ]; then
     touch "$STATE/runner-checked"
     if [ "$latest" != "$current" ] && [ "$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)" = "$latest" ]; then
-      log "Actions runner $latest released (image has $current): rebuilding"
-      to 1800 docker compose build --pull >/dev/null 2>&1
-      [ "$(runner_version)" = "$latest" ] \
-        || to 1800 docker compose build --build-arg RUNNER_VERSION="$latest" >/dev/null 2>&1
-      now=$(runner_version)
-      if [ "$now" = "$latest" ]; then
+      if ! digest=$("$WERKBANK/bin/pin-base.sh" --print "$latest" 2>&1); then
+        log "Actions runner $latest released (image has $current), but: $digest; retrying next check"
+        now=skip
+      else
+        log "Actions runner $latest released (image has $current): rebuilding on $digest"
+        to 1800 docker compose build --build-arg RUNNER_VERSION="$latest" \
+          --build-arg BASE_DIGEST="$digest" >/dev/null 2>&1
+        now=$(runner_version)
+      fi
+      if [ "$now" = skip ]; then
+        :
+      elif [ "$now" = "$latest" ]; then
         log "image rebuilt with runner $now; runners move to it as they go idle"
         notify "CI runner image rebuilt with Actions runner $now."
       else

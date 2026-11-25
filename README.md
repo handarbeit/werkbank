@@ -23,7 +23,7 @@ a fork's pull request run code on your machine.
 
 | Path | What |
 |---|---|
-| [`image/`](image/) | The runner image: [`myoung34/github-runner`](https://github.com/myoung34/docker-github-actions-runner) plus what `ubuntu-latest` has and the base lacks (Node 24, Playwright's system libraries, C/C++ build tools), and a start script that wipes the previous job's files |
+| [`image/`](image/) | The runner image: GitHub's official [`ghcr.io/actions/actions-runner`](https://github.com/actions/runner/pkgs/container/actions-runner), pinned by digest, plus what `ubuntu-latest` has and the base lacks (Node 24, `gh`, Python, Playwright's system libraries, C/C++ build tools), and start scripts that wipe the previous job's files and register the runner |
 | [`compose/runner.yml`](compose/runner.yml) | The shared runner definition your deployment `extends` once per runner |
 | [`bin/roll.sh`](bin/roll.sh) | Recreate runners only once they're idle, so a config change never kills a job |
 | [`controller/`](controller/) | The **overflow controller**: priority tiers across machines, host-pressure mode, and keeping jobs off a busy overflow host ([docs/overflow.md](docs/overflow.md)) |
@@ -102,5 +102,5 @@ Studio and a Windows PC as overflow, serving a busy GitHub org around the clock.
 ## Licence
 
 Apache-2.0, as Fabrik; see [LICENSE](LICENSE). The base image it builds on,
-[`myoung34/github-runner`](https://github.com/myoung34/docker-github-actions-runner), is GPL-3.0;
-Werkbank references it and doesn't redistribute it.
+GitHub's [`actions/runner`](https://github.com/actions/runner), is MIT-licensed; Werkbank
+references it and doesn't redistribute it.
