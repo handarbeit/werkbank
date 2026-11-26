@@ -28,4 +28,4 @@ for d in bin externals; do
   old=$(ls -d "$d".[0-9]* 2>/dev/null | sort -V | tail -1)
   [ -n "$old" ] && rm -rf "$d" && mv "$old" "$d" && echo "clean-start: restored $d from $old"
 done
-exec /entrypoint.sh "$@"
+exec "$@"

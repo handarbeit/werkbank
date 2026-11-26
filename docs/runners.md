@@ -98,17 +98,22 @@ crash-loops (`./bin/Runner.Listener: No such file or directory`) until it's recr
 every runner hits the next release within hours, a whole tier can go dark at once.
 
 The watchdog keeps the image current instead. Every `RUNNER_CHECK_HOURS` (6) it compares the
-image's runner with GitHub's latest release, and if there's a newer one it rebuilds:
-`docker compose build --pull` picks up the base image's new runner, and if the base hasn't caught
-up yet, the build installs the release itself (the Dockerfile's `RUNNER_VERSION` argument). Then,
+image's runner with GitHub's latest release, and if there's a newer one it rebuilds the image on
+GitHub's official runner image for that release, pinned to the digest its tag has at that moment
+(`bin/pin-base.sh --print`, passed as the `RUNNER_VERSION` and `BASE_DIGEST` build arguments).
+GitHub publishes the image along with the release; if it isn't there yet, the watchdog tries
+again at the next check. Then,
 every run, it recreates each runner still on the old image once it's idle (`roll.sh --once`).
 `roll.sh` asks GitHub whether a runner is busy, through `gh`. On a host with no `gh` login the
 watchdog borrows a token from the overflow controller's credentials (`overflow.py --token`);
 with neither, every runner looks busy and none is ever moved onto the new image.
 GitHub keeps sending jobs to an older runner for some weeks after a release, so there's no rush.
 
-To upgrade by hand: `docker compose build --pull`, then `bin/roll.sh <service>...`; or pin a
-version with `docker compose build --build-arg RUNNER_VERSION=2.338.1`.
+To upgrade by hand, move the pin in `image/Dockerfile` with `bin/pin-base.sh` (the latest release)
+or `bin/pin-base.sh 2.338.2`, then `docker compose build` and `bin/roll.sh <service>...`. A plain
+`docker compose build` uses the Dockerfile's pin, so on a host whose watchdog has already moved
+past it, it builds an older runner, and the watchdog moves it forward again at its next check.
+Commit the moved pin so the hosts agree.
 
 If a runner did update itself and broke anyway, `image/clean-start.sh` puts the previous version
 back (`bin.<version>` to `bin`) when the container restarts.
@@ -149,6 +154,7 @@ replaced*. GitHub keeps only one *pending* run per concurrency group even with
 Register runners with a GitHub App, not a personal token: an ephemeral runner asks for a
 registration token after every job, and on a personal token that spends the person's API quota.
 [github-app.md](github-app.md) has the setup. Whatever the credential, name it per service in
-`environment:` and don't give services `env_file: .env`: the image clears only its own variables
-(`ACCESS_TOKEN`, `APP_*`) before a job starts, so anything else in the container's environment is
-visible to every job.
+`environment:` and don't give services `env_file: .env`: the image keeps only its own variables
+(`ACCESS_TOKEN`, `APP_*`) out of the jobs' environment, so anything else in the container's
+environment is visible to every job. Even those are readable by a job that uses sudo; see
+[github-app.md](github-app.md#what-a-job-can-see).
